@@ -8,6 +8,14 @@ import type {
   ContentResponse,
   SnapshotResult,
   ActionType,
+  ClickParams,
+  TypeParams,
+  PressKeyParams,
+  HoverParams,
+  FillFormParams,
+  SelectOptionParams,
+  EvaluateParams,
+  WaitForParams,
 } from '@agentfox/shared';
 
 // ============================================================
@@ -675,12 +683,429 @@ function handleSnapshot(): SnapshotResult {
 }
 
 // ============================================================
+// Ref resolution helper
+// ============================================================
+
+/**
+ * Resolve a ref ID (e.g. "e5") to the corresponding DOM element.
+ * Throws if the ref is not found (stale or invalid).
+ */
+function resolveRef(ref: string): Element {
+  const el = refMap.get(ref);
+  if (!el) {
+    throw new Error(
+      `Element ref "${ref}" not found. The page may have changed since the last snapshot. Take a new snapshot and use updated refs.`,
+    );
+  }
+  // Verify the element is still in the document
+  if (!document.contains(el)) {
+    refMap.delete(ref);
+    throw new Error(
+      `Element ref "${ref}" is stale — the element is no longer in the DOM. Take a new snapshot.`,
+    );
+  }
+  return el;
+}
+
+// ============================================================
+// Click handler
+// ============================================================
+
+function handleClick(params: ClickParams): void {
+  const el = resolveRef(params.ref);
+  const rect = el.getBoundingClientRect();
+  const x = rect.left + rect.width / 2;
+  const y = rect.top + rect.height / 2;
+
+  const buttonCode =
+    params.button === 'right' ? 2 : params.button === 'middle' ? 1 : 0;
+
+  const modifiers = {
+    altKey: params.modifiers?.includes('Alt') ?? false,
+    ctrlKey: params.modifiers?.includes('Control') ?? false,
+    metaKey: params.modifiers?.includes('Meta') ?? false,
+    shiftKey: params.modifiers?.includes('Shift') ?? false,
+  };
+
+  const commonOpts: MouseEventInit = {
+    bubbles: true,
+    cancelable: true,
+    view: window,
+    clientX: x,
+    clientY: y,
+    button: buttonCode,
+    ...modifiers,
+  };
+
+  // Dispatch mouse events in the correct order
+  el.dispatchEvent(new MouseEvent('mousedown', commonOpts));
+  el.dispatchEvent(new MouseEvent('mouseup', commonOpts));
+  el.dispatchEvent(new MouseEvent('click', commonOpts));
+
+  if (params.doubleClick) {
+    el.dispatchEvent(new MouseEvent('mousedown', commonOpts));
+    el.dispatchEvent(new MouseEvent('mouseup', commonOpts));
+    el.dispatchEvent(
+      new MouseEvent('dblclick', { ...commonOpts, detail: 2 }),
+    );
+  }
+
+  // Focus the element if it's focusable
+  if (el instanceof HTMLElement) {
+    el.focus();
+  }
+}
+
+// ============================================================
+// Type handler
+// ============================================================
+
+async function handleType(params: TypeParams): Promise<void> {
+  const el = resolveRef(params.ref);
+
+  // Focus the element
+  if (el instanceof HTMLElement) {
+    el.focus();
+  }
+
+  // Clear existing value and set new one
+  if (
+    el instanceof HTMLInputElement ||
+    el instanceof HTMLTextAreaElement
+  ) {
+    // Select all existing text then replace
+    el.select();
+
+    if (params.slowly) {
+      // Type character by character, dispatching events for each
+      el.value = '';
+      for (const char of params.text) {
+        el.value += char;
+        el.dispatchEvent(new KeyboardEvent('keydown', { key: char, bubbles: true }));
+        el.dispatchEvent(new KeyboardEvent('keypress', { key: char, bubbles: true }));
+        el.dispatchEvent(new InputEvent('input', { data: char, inputType: 'insertText', bubbles: true }));
+        el.dispatchEvent(new KeyboardEvent('keyup', { key: char, bubbles: true }));
+        // Small delay between characters
+        await new Promise((r) => setTimeout(r, 30));
+      }
+    } else {
+      el.value = params.text;
+      el.dispatchEvent(
+        new InputEvent('input', {
+          data: params.text,
+          inputType: 'insertText',
+          bubbles: true,
+        }),
+      );
+    }
+
+    // Fire change event
+    el.dispatchEvent(new Event('change', { bubbles: true }));
+  } else if (el instanceof HTMLElement && el.isContentEditable) {
+    // Content-editable element
+    el.textContent = params.text;
+    el.dispatchEvent(
+      new InputEvent('input', {
+        data: params.text,
+        inputType: 'insertText',
+        bubbles: true,
+      }),
+    );
+  } else {
+    throw new Error(
+      `Element ref "${params.ref}" is not an editable element (input, textarea, or contenteditable)`,
+    );
+  }
+
+  // Submit if requested (press Enter)
+  if (params.submit) {
+    el.dispatchEvent(
+      new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', bubbles: true }),
+    );
+    el.dispatchEvent(
+      new KeyboardEvent('keypress', { key: 'Enter', code: 'Enter', bubbles: true }),
+    );
+    el.dispatchEvent(
+      new KeyboardEvent('keyup', { key: 'Enter', code: 'Enter', bubbles: true }),
+    );
+
+    // Submit the containing form if there is one
+    const form = el.closest('form');
+    if (form) {
+      form.requestSubmit();
+    }
+  }
+}
+
+// ============================================================
+// Press key handler
+// ============================================================
+
+function handlePressKey(params: PressKeyParams): void {
+  // Dispatch to the focused element or document body
+  const target = document.activeElement || document.body;
+
+  const opts: KeyboardEventInit = {
+    key: params.key,
+    code: params.key,
+    bubbles: true,
+    cancelable: true,
+  };
+
+  target.dispatchEvent(new KeyboardEvent('keydown', opts));
+  target.dispatchEvent(new KeyboardEvent('keypress', opts));
+  target.dispatchEvent(new KeyboardEvent('keyup', opts));
+}
+
+// ============================================================
+// Hover handler
+// ============================================================
+
+function handleHover(params: HoverParams): void {
+  const el = resolveRef(params.ref);
+  const rect = el.getBoundingClientRect();
+  const x = rect.left + rect.width / 2;
+  const y = rect.top + rect.height / 2;
+
+  const opts: MouseEventInit = {
+    bubbles: true,
+    cancelable: true,
+    view: window,
+    clientX: x,
+    clientY: y,
+  };
+
+  el.dispatchEvent(new MouseEvent('mouseenter', { ...opts, bubbles: false }));
+  el.dispatchEvent(new MouseEvent('mouseover', opts));
+  el.dispatchEvent(new MouseEvent('mousemove', opts));
+}
+
+// ============================================================
+// Fill form handler
+// ============================================================
+
+function handleFillForm(params: FillFormParams): { filledCount: number } {
+  let filledCount = 0;
+
+  for (const field of params.fields) {
+    const el = resolveRef(field.ref);
+
+    switch (field.type) {
+      case 'textbox': {
+        if (
+          el instanceof HTMLInputElement ||
+          el instanceof HTMLTextAreaElement
+        ) {
+          el.focus();
+          el.value = field.value;
+          el.dispatchEvent(new InputEvent('input', { data: field.value, inputType: 'insertText', bubbles: true }));
+          el.dispatchEvent(new Event('change', { bubbles: true }));
+        } else if (el instanceof HTMLElement && el.isContentEditable) {
+          el.focus();
+          el.textContent = field.value;
+          el.dispatchEvent(new InputEvent('input', { data: field.value, inputType: 'insertText', bubbles: true }));
+        } else {
+          throw new Error(`Field "${field.name}" (ref ${field.ref}) is not a text input`);
+        }
+        break;
+      }
+
+      case 'checkbox': {
+        if (el instanceof HTMLInputElement && el.type === 'checkbox') {
+          const shouldBeChecked = field.value === 'true';
+          if (el.checked !== shouldBeChecked) {
+            el.click();
+          }
+        } else {
+          throw new Error(`Field "${field.name}" (ref ${field.ref}) is not a checkbox`);
+        }
+        break;
+      }
+
+      case 'radio': {
+        if (el instanceof HTMLInputElement && el.type === 'radio') {
+          if (!el.checked) {
+            el.click();
+          }
+        } else {
+          throw new Error(`Field "${field.name}" (ref ${field.ref}) is not a radio button`);
+        }
+        break;
+      }
+
+      case 'combobox': {
+        if (el instanceof HTMLSelectElement) {
+          // Find the option by text content
+          const option = Array.from(el.options).find(
+            (opt) => opt.textContent?.trim() === field.value || opt.value === field.value,
+          );
+          if (!option) {
+            throw new Error(
+              `Option "${field.value}" not found in select "${field.name}" (ref ${field.ref})`,
+            );
+          }
+          el.value = option.value;
+          el.dispatchEvent(new Event('change', { bubbles: true }));
+        } else {
+          throw new Error(`Field "${field.name}" (ref ${field.ref}) is not a select element`);
+        }
+        break;
+      }
+
+      case 'slider': {
+        if (el instanceof HTMLInputElement && el.type === 'range') {
+          el.value = field.value;
+          el.dispatchEvent(new InputEvent('input', { bubbles: true }));
+          el.dispatchEvent(new Event('change', { bubbles: true }));
+        } else {
+          throw new Error(`Field "${field.name}" (ref ${field.ref}) is not a range input`);
+        }
+        break;
+      }
+
+      default:
+        throw new Error(`Unknown field type: ${field.type}`);
+    }
+
+    filledCount++;
+  }
+
+  return { filledCount };
+}
+
+// ============================================================
+// Select option handler
+// ============================================================
+
+function handleSelectOption(params: SelectOptionParams): { selected: string[] } {
+  const el = resolveRef(params.ref);
+
+  if (!(el instanceof HTMLSelectElement)) {
+    throw new Error(
+      `Element ref "${params.ref}" is not a <select> element`,
+    );
+  }
+
+  const selected: string[] = [];
+
+  // Deselect all options first
+  for (const opt of el.options) {
+    opt.selected = false;
+  }
+
+  // Select matching options by text or value
+  for (const value of params.values) {
+    const option = Array.from(el.options).find(
+      (opt) => opt.textContent?.trim() === value || opt.value === value,
+    );
+    if (!option) {
+      throw new Error(
+        `Option "${value}" not found in select element (ref ${params.ref})`,
+      );
+    }
+    option.selected = true;
+    selected.push(option.textContent?.trim() || option.value);
+  }
+
+  el.dispatchEvent(new Event('change', { bubbles: true }));
+
+  return { selected };
+}
+
+// ============================================================
+// Evaluate handler
+// ============================================================
+
+function handleEvaluate(params: EvaluateParams): { value: unknown } {
+  let el: Element | undefined;
+  if (params.ref) {
+    el = resolveRef(params.ref);
+  }
+
+  // Create a function from the string and execute it
+  // The function body is expected to be like: () => { ... } or (element) => { ... }
+  const fn = new Function('return (' + params.function + ')')();
+
+  if (typeof fn !== 'function') {
+    throw new Error('The provided string did not evaluate to a function');
+  }
+
+  const result = el ? fn(el) : fn();
+  return { value: result };
+}
+
+// ============================================================
+// Wait for handler
+// ============================================================
+
+function handleWaitFor(params: WaitForParams): Promise<{ matched: boolean }> {
+  const timeoutMs = params.time ? params.time * 1000 : 30000;
+
+  return new Promise((resolve) => {
+    // If just waiting for time, use setTimeout
+    if (!params.text && !params.textGone) {
+      setTimeout(() => resolve({ matched: true }), timeoutMs);
+      return;
+    }
+
+    const searchText = params.text || params.textGone!;
+    const waitForAppear = !!params.text;
+
+    // Check immediately
+    const bodyText = document.body?.textContent || '';
+    const found = bodyText.includes(searchText);
+    if ((waitForAppear && found) || (!waitForAppear && !found)) {
+      resolve({ matched: true });
+      return;
+    }
+
+    // Set up a MutationObserver to watch for changes
+    let resolved = false;
+    const timeout = setTimeout(() => {
+      if (!resolved) {
+        resolved = true;
+        observer.disconnect();
+        resolve({ matched: false });
+      }
+    }, timeoutMs);
+
+    const observer = new MutationObserver(() => {
+      if (resolved) return;
+
+      const currentText = document.body?.textContent || '';
+      const nowFound = currentText.includes(searchText);
+
+      if ((waitForAppear && nowFound) || (!waitForAppear && !nowFound)) {
+        resolved = true;
+        clearTimeout(timeout);
+        observer.disconnect();
+        resolve({ matched: true });
+      }
+    });
+
+    observer.observe(document.body, {
+      childList: true,
+      subtree: true,
+      characterData: true,
+    });
+  });
+}
+
+// ============================================================
 // Message handler
 // ============================================================
 
-/** Actions that are implemented in this wave */
+/** Actions that are implemented */
 const IMPLEMENTED_ACTIONS: ReadonlySet<ActionType> = new Set([
   'snapshot',
+  'click',
+  'type',
+  'press_key',
+  'hover',
+  'fill_form',
+  'select_option',
+  'evaluate',
+  'wait_for',
 ]);
 
 function isContentRequest(message: unknown): message is ContentRequest {
@@ -711,7 +1136,11 @@ function makeResponse(
 }
 
 /** Process a validated content request and return a response */
-async function processRequest(id: string, action: ActionType): Promise<ContentResponse> {
+async function processRequest(
+  id: string,
+  action: ActionType,
+  params: ContentRequest['params'],
+): Promise<ContentResponse> {
   try {
     if (!IMPLEMENTED_ACTIONS.has(action)) {
       return makeResponse(
@@ -722,11 +1151,48 @@ async function processRequest(id: string, action: ActionType): Promise<ContentRe
       );
     }
 
+    let result: unknown;
+
     switch (action) {
-      case 'snapshot': {
-        const result = handleSnapshot();
-        return makeResponse(id, true, result);
-      }
+      case 'snapshot':
+        result = handleSnapshot();
+        break;
+
+      case 'click':
+        handleClick(params as ClickParams);
+        result = {};
+        break;
+
+      case 'type':
+        await handleType(params as TypeParams);
+        result = {};
+        break;
+
+      case 'press_key':
+        handlePressKey(params as PressKeyParams);
+        result = {};
+        break;
+
+      case 'hover':
+        handleHover(params as HoverParams);
+        result = {};
+        break;
+
+      case 'fill_form':
+        result = handleFillForm(params as FillFormParams);
+        break;
+
+      case 'select_option':
+        result = handleSelectOption(params as SelectOptionParams);
+        break;
+
+      case 'evaluate':
+        result = handleEvaluate(params as EvaluateParams);
+        break;
+
+      case 'wait_for':
+        result = await handleWaitFor(params as WaitForParams);
+        break;
 
       default:
         return makeResponse(
@@ -736,6 +1202,8 @@ async function processRequest(id: string, action: ActionType): Promise<ContentRe
           `Unhandled action: ${action}`,
         );
     }
+
+    return makeResponse(id, true, result);
   } catch (err) {
     const errMsg = err instanceof Error ? err.message : String(err);
     logError(`Error handling ${action} [${id}]:`, err);
@@ -754,10 +1222,10 @@ function handleMessage(
 ): Promise<ContentResponse> | undefined {
   if (!isContentRequest(message)) return undefined;
 
-  const { id, action } = message;
+  const { id, action, params } = message;
   log(`Received ${action} request [${id}]`);
 
-  return processRequest(id, action);
+  return processRequest(id, action, params);
 }
 
 // ============================================================

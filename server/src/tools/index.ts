@@ -32,14 +32,34 @@ export interface ToolDefinition {
 // ============================================================
 
 import navigateTool from './navigate.js';
+import navigateBackTool from './navigate-back.js';
 import snapshotTool from './snapshot.js';
 import screenshotTool from './screenshot.js';
+import { clickTool, typeTool, pressKeyTool, hoverTool } from './interact.js';
+import { fillFormTool, selectOptionTool } from './form.js';
+import tabsTool from './tabs.js';
+import closeTool from './close.js';
+import resizeTool from './resize.js';
+import evaluateTool from './evaluate.js';
+import waitTool from './wait.js';
 
 /** All registered tool definitions */
 export const tools: ToolDefinition[] = [
   navigateTool,
+  navigateBackTool,
   snapshotTool,
   screenshotTool,
+  clickTool,
+  typeTool,
+  pressKeyTool,
+  hoverTool,
+  fillFormTool,
+  selectOptionTool,
+  tabsTool,
+  closeTool,
+  resizeTool,
+  evaluateTool,
+  waitTool,
 ];
 
 /** Map for O(1) tool lookups by name. Built at module load time. */
