@@ -24,6 +24,13 @@ import type { Command, CommandResponse } from '@agentfox/shared';
 import { IpcClient, getDefaultSocketPath } from './ipc.js';
 
 // ---------------------------------------------------------------------------
+// Constants
+// ---------------------------------------------------------------------------
+
+/** Interval (ms) between IPC connection health checks. */
+const HEALTH_CHECK_INTERVAL_MS = 1000;
+
+// ---------------------------------------------------------------------------
 // Logging -- everything goes to stderr, stdout is sacred
 // ---------------------------------------------------------------------------
 
@@ -80,8 +87,12 @@ async function* readNativeMessages(
       const jsonBytes = buffer.subarray(4, 4 + messageLength);
       buffer = buffer.subarray(4 + messageLength);
 
-      const message: unknown = JSON.parse(jsonBytes.toString('utf-8'));
-      yield message;
+      try {
+        const message: unknown = JSON.parse(jsonBytes.toString('utf-8'));
+        yield message;
+      } catch (err) {
+        logError('Failed to parse native message JSON, skipping', err);
+      }
     }
   }
 }
@@ -120,12 +131,7 @@ function writeNativeMessage(data: unknown): Promise<void> {
 async function main(): Promise<void> {
   log('Starting native messaging host relay');
 
-  // Ensure stdin is in binary/raw mode
-  if (process.stdin.setRawMode) {
-    // setRawMode is only available when stdin is a TTY; in native messaging
-    // it comes from a pipe, so this branch typically won't execute.
-    process.stdin.setRawMode(true);
-  }
+  // Ensure stdin is flowing (it starts paused in Node.js)
   process.stdin.resume();
 
   // Track whether we're shutting down to avoid duplicate cleanup
@@ -148,7 +154,10 @@ async function main(): Promise<void> {
   }
 
   // --- Create IPC client with command handler ---
-  // When the MCP server sends a command over IPC, relay it to Firefox via stdout
+  // When the MCP server sends a command over IPC, relay it to Firefox via stdout.
+  // Writes are serialized through a promise chain to prevent interleaving
+  // under backpressure (H4 fix).
+  let writeChain = Promise.resolve();
   const socketPath = getDefaultSocketPath();
   log(`Connecting to MCP server at ${socketPath}`);
 
@@ -156,10 +165,12 @@ async function main(): Promise<void> {
     socketPath,
     onCommand: (command: Command): void => {
       log(`Relaying command to Firefox: ${command.action} (id: ${command.id})`);
-      writeNativeMessage(command).catch((error) => {
-        logError('Failed to write command to stdout', error);
-        shutdown('stdout write failed');
-      });
+      writeChain = writeChain
+        .then(() => writeNativeMessage(command))
+        .catch((error) => {
+          logError('Failed to write command to stdout', error);
+          shutdown('stdout write failed');
+        });
     },
   });
 
@@ -180,7 +191,7 @@ async function main(): Promise<void> {
       clearInterval(healthCheckInterval);
       shutdown('IPC connection lost (MCP server stopped)');
     }
-  }, 1000);
+  }, HEALTH_CHECK_INTERVAL_MS);
 
   // --- stdin -> IPC: Relay responses from Firefox to MCP server ---
   try {
