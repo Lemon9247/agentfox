@@ -226,7 +226,7 @@ describe('handleType', () => {
 // ============================================================
 
 describe('handlePressKey', () => {
-  it('dispatches keydown, keypress, keyup', () => {
+  it('dispatches keydown and keyup (no deprecated keypress)', () => {
     document.body.innerHTML = '<input id="inp" type="text" />';
     snapshotAndGetRef('inp');
     (document.getElementById('inp') as HTMLElement).focus();
@@ -237,7 +237,7 @@ describe('handlePressKey', () => {
     document.getElementById('inp')!.addEventListener('keyup', () => events.push('keyup'));
 
     handlePressKey({ key: 'Enter' });
-    expect(events).toEqual(['keydown', 'keypress', 'keyup']);
+    expect(events).toEqual(['keydown', 'keyup']);
   });
 
   it('sets correct key and code properties', () => {

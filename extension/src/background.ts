@@ -74,6 +74,12 @@ declare namespace browser {
   interface Window {
     id?: number;
   }
+
+  namespace browserAction {
+    function setBadgeText(details: { text: string }): Promise<void>;
+    function setBadgeBackgroundColor(details: { color: string }): Promise<void>;
+    function setTitle(details: { title: string }): Promise<void>;
+  }
 }
 
 // ============================================================
@@ -390,12 +396,8 @@ async function handleTabs(
 }
 
 async function handleClose(): Promise<Record<string, never>> {
-  // Delegate to handleTabs to avoid duplicating the close-active-tab logic
-  await handleTabs({
-    id: '',
-    action: 'tabs',
-    params: { action: 'close' },
-  });
+  const tab = await getActiveTab();
+  await browser.tabs.remove(tab.id!);
   return {};
 }
 
@@ -531,10 +533,20 @@ function connect(): void {
       error ? error.message : 'unknown reason',
     );
     port = null;
+
+    // Update browser action badge to show disconnected status
+    browser.browserAction.setBadgeText({ text: '' });
+    browser.browserAction.setTitle({ title: 'Agent Fox - Disconnected' });
+
     scheduleReconnect();
   });
 
   log('Connected to native host.');
+
+  // Update browser action badge to show connected status
+  browser.browserAction.setBadgeText({ text: 'ON' });
+  browser.browserAction.setBadgeBackgroundColor({ color: '#10B981' });
+  browser.browserAction.setTitle({ title: 'Agent Fox - Connected' });
 }
 
 function scheduleReconnect(): void {
