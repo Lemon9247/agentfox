@@ -3,7 +3,8 @@ import type { ToolDefinition } from './index.js';
 const waitTool: ToolDefinition = {
   name: 'browser_wait_for',
   description:
-    'Wait for text to appear or disappear or a specified time to pass',
+    'Wait for text to appear or disappear or a specified time to pass. ' +
+    'If no "time" parameter is provided, the wait times out after 30 seconds by default.',
   inputSchema: {
     type: 'object',
     properties: {
@@ -17,7 +18,7 @@ const waitTool: ToolDefinition = {
       },
       time: {
         type: 'number',
-        description: 'The time to wait in seconds',
+        description: 'The time to wait in seconds (defaults to 30 if not specified)',
       },
     },
   },
