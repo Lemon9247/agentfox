@@ -1178,26 +1178,37 @@ export function handleWaitFor(params: WaitForParams): Promise<{ matched: boolean
 
     // Set up a MutationObserver to watch for changes
     let resolved = false;
+    // Debounce the observer callback to avoid excessive text checks
+    // on attribute-heavy pages (at most once per 100ms)
+    let debounceTimer: ReturnType<typeof setTimeout> | null = null;
+
     const timeout = setTimeout(() => {
       if (!resolved) {
         resolved = true;
+        if (debounceTimer !== null) clearTimeout(debounceTimer);
         observer.disconnect();
         resolve({ matched: false });
       }
     }, timeoutMs);
-
-    const observer = new MutationObserver(() => {
+    const checkText = () => {
       if (resolved) return;
-
       const currentText = document.body?.textContent || '';
       const nowFound = currentText.includes(searchText);
-
       if ((waitForAppear && nowFound) || (!waitForAppear && !nowFound)) {
         resolved = true;
         clearTimeout(timeout);
         observer.disconnect();
         resolve({ matched: true });
       }
+    };
+
+    const observer = new MutationObserver(() => {
+      if (resolved) return;
+      if (debounceTimer !== null) return;
+      debounceTimer = setTimeout(() => {
+        debounceTimer = null;
+        checkText();
+      }, 100);
     });
 
     observer.observe(document.body, {
