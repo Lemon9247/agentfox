@@ -75,6 +75,20 @@ declare namespace browser {
     id?: number;
   }
 
+  namespace cookies {
+    interface Cookie {
+      name: string;
+      value: string;
+      domain: string;
+      path: string;
+      secure: boolean;
+      httpOnly: boolean;
+      sameSite: string;
+      expirationDate?: number;
+    }
+    function getAll(details: { url?: string; domain?: string }): Promise<Cookie[]>;
+  }
+
   namespace browserAction {
     function setBadgeText(details: { text: string }): Promise<void>;
     function setBadgeBackgroundColor(details: { color: string }): Promise<void>;
@@ -422,6 +436,37 @@ async function handleResize(
   return {};
 }
 
+async function handleGetCookies(
+  command: Command & { action: 'get_cookies' },
+): Promise<{ cookies: Array<{ name: string; value: string; domain: string; path: string; secure: boolean; httpOnly: boolean; sameSite: string; expirationDate?: number }> }> {
+  const { params } = command;
+  let url = params.url;
+
+  if (!url) {
+    const tab = await getActiveTab();
+    url = tab.url || '';
+  }
+
+  if (!url) {
+    throw new Error('No URL available to get cookies for');
+  }
+
+  const cookies = await browser.cookies.getAll({ url });
+
+  return {
+    cookies: cookies.map((c) => ({
+      name: c.name,
+      value: c.value,
+      domain: c.domain,
+      path: c.path,
+      secure: c.secure,
+      httpOnly: c.httpOnly,
+      sameSite: c.sameSite,
+      expirationDate: c.expirationDate,
+    })),
+  };
+}
+
 // ============================================================
 // Command dispatcher
 // ============================================================
@@ -472,6 +517,10 @@ async function handleCommand(
 
       case 'resize':
         result = await handleResize(command);
+        break;
+
+      case 'get_cookies':
+        result = await handleGetCookies(command);
         break;
 
       default:

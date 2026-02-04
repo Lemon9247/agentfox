@@ -18,7 +18,8 @@ export type ActionType =
   | 'wait_for'
   | 'tabs'
   | 'close'
-  | 'resize';
+  | 'resize'
+  | 'get_cookies';
 
 // ============================================================
 // Tool Parameter Types — typed params for each action
@@ -107,6 +108,10 @@ export interface ResizeParams {
   height: number;
 }
 
+export interface GetCookiesParams {
+  url?: string;
+}
+
 /** No params needed */
 export type EmptyParams = Record<string, never>;
 
@@ -134,7 +139,8 @@ export type Command =
   | CommandBase & { action: 'wait_for'; params: WaitForParams }
   | CommandBase & { action: 'tabs'; params: TabsParams }
   | CommandBase & { action: 'close'; params: EmptyParams }
-  | CommandBase & { action: 'resize'; params: ResizeParams };
+  | CommandBase & { action: 'resize'; params: ResizeParams }
+  | CommandBase & { action: 'get_cookies'; params: GetCookiesParams };
 
 /** Response from extension back to MCP server */
 export interface CommandResponse {
@@ -214,6 +220,21 @@ export interface EvaluateResult {
 
 export interface WaitForResult {
   matched: boolean;
+}
+
+export interface CookieInfo {
+  name: string;
+  value: string;
+  domain: string;
+  path: string;
+  secure: boolean;
+  httpOnly: boolean;
+  sameSite: string;
+  expirationDate?: number;
+}
+
+export interface GetCookiesResult {
+  cookies: CookieInfo[];
 }
 
 // ============================================================
