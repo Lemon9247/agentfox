@@ -1,7 +1,10 @@
-import { existsSync, mkdirSync, writeFileSync, realpathSync } from 'node:fs';
+import { existsSync, mkdirSync, writeFileSync, realpathSync, unlinkSync } from 'node:fs';
+import * as net from 'node:net';
 import { homedir, platform } from 'node:os';
 import { dirname, resolve, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+
+import { getDefaultSocketPath } from './ipc.js';
 
 const EXTENSION_ID = 'agentfox@willow.sh';
 
@@ -18,7 +21,9 @@ const USAGE = `Agent Fox v${VERSION} — AI browser agent for Firefox
 Usage: agentfox <command>
 
 Commands:
-  setup    Install native messaging host and show MCP config
+  setup      Install native messaging host and show MCP config
+  status     Check Agent Fox connectivity status
+  uninstall  Remove native messaging host manifest
 
 Options:
   -h, --help      Show this help message
@@ -132,9 +137,97 @@ function setup(): void {
 }
 
 /**
+ * Try to connect to the Unix socket to see if the MCP server is running.
+ * Returns true if a connection was established within 1 second.
+ */
+function checkSocketConnectivity(socketPath: string): Promise<boolean> {
+  return new Promise((resolve) => {
+    const socket = net.createConnection(socketPath, () => {
+      socket.destroy();
+      resolve(true);
+    });
+    socket.setTimeout(1000);
+    socket.on('timeout', () => {
+      socket.destroy();
+      resolve(false);
+    });
+    socket.on('error', () => {
+      socket.destroy();
+      resolve(false);
+    });
+  });
+}
+
+/**
+ * The `status` subcommand: checks connectivity of Agent Fox components.
+ */
+async function status(): Promise<void> {
+  console.log('Agent Fox Status');
+  console.log('\u2500'.repeat(16));
+
+  // Check native messaging host manifest
+  try {
+    const nmHostDir = getNativeMessagingHostDir();
+    const manifestPath = join(nmHostDir, `${NM_HOST_NAME}.json`);
+    if (existsSync(manifestPath)) {
+      console.log(`NM host manifest: \u2713 Installed (${manifestPath})`);
+    } else {
+      console.log(`NM host manifest: \u2717 Not found (expected at ${manifestPath})`);
+      console.log('                  Run "agentfox setup" to install');
+    }
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.log(`NM host manifest: \u2717 ${message}`);
+  }
+
+  // Check socket file and MCP server connectivity
+  const socketPath = getDefaultSocketPath();
+  if (existsSync(socketPath)) {
+    const connected = await checkSocketConnectivity(socketPath);
+    if (connected) {
+      console.log(`MCP server:       \u2713 Running (socket: ${socketPath})`);
+    } else {
+      console.log(`MCP server:       \u2717 Socket exists but not responding (${socketPath})`);
+    }
+  } else {
+    console.log(`MCP server:       \u2717 Not running (no socket at ${socketPath})`);
+  }
+
+  // Extension status — can't check from CLI
+  console.log('Extension:        ? (cannot check from CLI)');
+}
+
+/**
+ * The `uninstall` subcommand: removes the native messaging host manifest.
+ */
+function uninstall(): void {
+  try {
+    const nmHostDir = getNativeMessagingHostDir();
+    const manifestPath = join(nmHostDir, `${NM_HOST_NAME}.json`);
+
+    if (!existsSync(manifestPath)) {
+      console.log(`Native messaging host manifest not found at: ${manifestPath}`);
+      console.log('Nothing to remove.');
+      return;
+    }
+
+    unlinkSync(manifestPath);
+    console.log(`Removed native messaging host manifest: ${manifestPath}`);
+    console.log();
+    console.log('Note: To fully remove Agent Fox from Claude Code, also remove the');
+    console.log('"agentfox" entry from your MCP servers configuration in ~/.claude.json');
+    console.log('or Claude Code Settings > MCP Servers.');
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.error(`Error: ${message}`);
+    process.exit(1);
+  }
+}
+
+/**
  * Main entry point — parse args and dispatch subcommand.
  */
-function main(): void {
+async function main(): Promise<void> {
   const args = process.argv.slice(2);
   const command = args[0];
 
@@ -153,10 +246,23 @@ function main(): void {
     return;
   }
 
+  if (command === 'status') {
+    await status();
+    return;
+  }
+
+  if (command === 'uninstall') {
+    uninstall();
+    return;
+  }
+
   console.error(`Unknown command: ${command}`);
   console.error();
   console.error(USAGE);
   process.exit(1);
 }
 
-main();
+main().catch((err) => {
+  console.error(err instanceof Error ? err.message : String(err));
+  process.exit(1);
+});
