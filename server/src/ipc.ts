@@ -14,7 +14,7 @@ export function getDefaultSocketPath(): string {
   if (xdgRuntime) {
     return `${xdgRuntime}/agentfox.sock`;
   }
-  return `/tmp/agentfox-${process.getuid!()}.sock`;
+  return `/tmp/agentfox-${process.getuid?.() ?? process.pid}.sock`;
 }
 
 // ============================================================
@@ -43,7 +43,11 @@ class FrameDecoder {
 
   /** Append incoming data and extract any complete messages. */
   push(data: Buffer): IpcMessage[] {
-    this.buffer = Buffer.concat([this.buffer, data]);
+    if (this.buffer.length === 0) {
+      this.buffer = data;
+    } else {
+      this.buffer = Buffer.concat([this.buffer, data]);
+    }
     const messages: IpcMessage[] = [];
 
     while (this.buffer.length >= 4) {
@@ -125,6 +129,14 @@ export class IpcServer extends EventEmitter<IpcServerEvents> {
 
       server.listen(this.socketPath, () => {
         this.server = server;
+
+        // Replace the startup error handler with a runtime-only handler
+        // so the dead `reject` reference is not held in the closure
+        server.removeAllListeners('error');
+        server.on('error', (err) => {
+          this.emit('error', err);
+        });
+
         resolve();
       });
     });
@@ -224,6 +236,14 @@ export class IpcServer extends EventEmitter<IpcServerEvents> {
     socket.on('close', () => {
       this.client = null;
       this.decoder.reset();
+
+      // Reject all pending commands -- the client is gone
+      for (const pending of this.pending.values()) {
+        clearTimeout(pending.timeout);
+        pending.reject(new Error('Client disconnected'));
+      }
+      this.pending.clear();
+
       this.emit('client-disconnected');
     });
 
@@ -264,17 +284,21 @@ export class IpcServer extends EventEmitter<IpcServerEvents> {
 export interface IpcClientOptions {
   socketPath: string;
   onCommand: (command: Command) => void;
+  /** Called when the socket closes or errors after a successful connection. */
+  onDisconnect?: (reason: string) => void;
 }
 
 export class IpcClient {
   private readonly socketPath: string;
   private readonly onCommand: (command: Command) => void;
+  private readonly onDisconnect?: (reason: string) => void;
   private socket: net.Socket | null = null;
   private decoder = new FrameDecoder();
 
   constructor(options: IpcClientOptions) {
     this.socketPath = options.socketPath;
     this.onCommand = options.onCommand;
+    this.onDisconnect = options.onDisconnect;
   }
 
   /** Whether the client is connected to the IPC server. */
@@ -291,9 +315,12 @@ export class IpcClient {
       });
 
       socket.on('error', (err) => {
-        // If we haven't connected yet, reject the promise
         if (!this.socket) {
+          // Connection phase: reject the promise
           reject(err);
+        } else {
+          // Post-connection: notify via callback
+          this.onDisconnect?.(`Socket error: ${err.message}`);
         }
       });
 
@@ -313,8 +340,12 @@ export class IpcClient {
       });
 
       socket.on('close', () => {
+        const wasConnected = this.socket !== null;
         this.socket = null;
         this.decoder.reset();
+        if (wasConnected) {
+          this.onDisconnect?.('Socket closed');
+        }
       });
     });
   }
@@ -326,7 +357,11 @@ export class IpcClient {
     }
 
     const message: IpcMessage = { type: 'response', payload: response };
-    this.socket.write(encodeFrame(message));
+    this.socket.write(encodeFrame(message), (err) => {
+      if (err) {
+        this.onDisconnect?.(`Write error: ${err.message}`);
+      }
+    });
   }
 
   /** Close the connection to the IPC server. */
