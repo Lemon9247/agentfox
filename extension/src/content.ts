@@ -95,11 +95,11 @@ const GENERIC_TAGS = new Set([
 
 /**
  * Maps ref IDs (e.g. "e0", "e1") to DOM elements.
- * Rebuilt on every snapshot call. Phase 2 action handlers will use this
- * to resolve refs from the agent into DOM elements.
+ * Rebuilt on every snapshot call. Action handlers use resolveRef() to
+ * look up elements by their ref ID.
  *
  * IMPORTANT: refs become stale if the DOM mutates or a new snapshot is taken.
- * Phase 2 should detect stale refs and return clear error messages.
+ * resolveRef() detects stale refs and returns clear error messages.
  */
 let refMap = new Map<string, Element>();
 
@@ -713,6 +713,12 @@ function resolveRef(ref: string): Element {
 
 function handleClick(params: ClickParams): void {
   const el = resolveRef(params.ref);
+
+  // Scroll element into view so coordinates are within the viewport
+  if (el instanceof HTMLElement) {
+    el.scrollIntoView({ block: 'center', behavior: 'instant' as ScrollBehavior });
+  }
+
   const rect = el.getBoundingClientRect();
   const x = rect.left + rect.width / 2;
   const y = rect.top + rect.height / 2;
@@ -737,17 +743,22 @@ function handleClick(params: ClickParams): void {
     ...modifiers,
   };
 
-  // Dispatch mouse events in the correct order
-  el.dispatchEvent(new MouseEvent('mousedown', commonOpts));
-  el.dispatchEvent(new MouseEvent('mouseup', commonOpts));
-  el.dispatchEvent(new MouseEvent('click', commonOpts));
+  // Dispatch pointer + mouse events in the correct browser order
+  // pointerdown -> mousedown -> pointerup -> mouseup -> click
+  el.dispatchEvent(new PointerEvent('pointerdown', { ...commonOpts, detail: 1 }));
+  el.dispatchEvent(new MouseEvent('mousedown', { ...commonOpts, detail: 1 }));
+  el.dispatchEvent(new PointerEvent('pointerup', { ...commonOpts, detail: 1 }));
+  el.dispatchEvent(new MouseEvent('mouseup', { ...commonOpts, detail: 1 }));
+  el.dispatchEvent(new MouseEvent('click', { ...commonOpts, detail: 1 }));
 
   if (params.doubleClick) {
-    el.dispatchEvent(new MouseEvent('mousedown', commonOpts));
-    el.dispatchEvent(new MouseEvent('mouseup', commonOpts));
-    el.dispatchEvent(
-      new MouseEvent('dblclick', { ...commonOpts, detail: 2 }),
-    );
+    // Second click in the double-click sequence, with detail=2
+    el.dispatchEvent(new PointerEvent('pointerdown', { ...commonOpts, detail: 2 }));
+    el.dispatchEvent(new MouseEvent('mousedown', { ...commonOpts, detail: 2 }));
+    el.dispatchEvent(new PointerEvent('pointerup', { ...commonOpts, detail: 2 }));
+    el.dispatchEvent(new MouseEvent('mouseup', { ...commonOpts, detail: 2 }));
+    el.dispatchEvent(new MouseEvent('click', { ...commonOpts, detail: 2 }));
+    el.dispatchEvent(new MouseEvent('dblclick', { ...commonOpts, detail: 2 }));
   }
 
   // Focus the element if it's focusable
@@ -773,9 +784,6 @@ async function handleType(params: TypeParams): Promise<void> {
     el instanceof HTMLInputElement ||
     el instanceof HTMLTextAreaElement
   ) {
-    // Select all existing text then replace
-    el.select();
-
     if (params.slowly) {
       // Type character by character, dispatching events for each
       el.value = '';
@@ -789,6 +797,8 @@ async function handleType(params: TypeParams): Promise<void> {
         await new Promise((r) => setTimeout(r, 30));
       }
     } else {
+      // Select all existing text then replace in one step
+      el.select();
       el.value = params.text;
       el.dispatchEvent(
         new InputEvent('input', {
@@ -802,15 +812,25 @@ async function handleType(params: TypeParams): Promise<void> {
     // Fire change event
     el.dispatchEvent(new Event('change', { bubbles: true }));
   } else if (el instanceof HTMLElement && el.isContentEditable) {
-    // Content-editable element
-    el.textContent = params.text;
-    el.dispatchEvent(
-      new InputEvent('input', {
-        data: params.text,
-        inputType: 'insertText',
-        bubbles: true,
-      }),
-    );
+    // Content-editable element — use execCommand to work with rich text editors
+    // Select all existing content first
+    const selection = window.getSelection();
+    const range = document.createRange();
+    range.selectNodeContents(el);
+    selection?.removeAllRanges();
+    selection?.addRange(range);
+
+    if (params.slowly) {
+      // Delete existing content, then type character by character
+      document.execCommand('delete', false);
+      for (const char of params.text) {
+        document.execCommand('insertText', false, char);
+        await new Promise((r) => setTimeout(r, 30));
+      }
+    } else {
+      // Replace all selected content at once
+      document.execCommand('insertText', false, params.text);
+    }
   } else {
     throw new Error(
       `Element ref "${params.ref}" is not an editable element (input, textarea, or contenteditable)`,
@@ -841,13 +861,33 @@ async function handleType(params: TypeParams): Promise<void> {
 // Press key handler
 // ============================================================
 
+/** Map a key name to the physical key code */
+function keyToCode(key: string): string {
+  // Single character keys
+  if (key.length === 1) {
+    const upper = key.toUpperCase();
+    if (upper >= 'A' && upper <= 'Z') return `Key${upper}`;
+    if (upper >= '0' && upper <= '9') return `Digit${upper}`;
+    // Common punctuation
+    const punctMap: Record<string, string> = {
+      ' ': 'Space', '-': 'Minus', '=': 'Equal', '[': 'BracketLeft',
+      ']': 'BracketRight', '\\': 'Backslash', ';': 'Semicolon',
+      "'": 'Quote', ',': 'Comma', '.': 'Period', '/': 'Slash',
+      '`': 'Backquote',
+    };
+    return punctMap[key] || key;
+  }
+  // Named keys where key and code match (Enter, Tab, Escape, Arrow*, etc.)
+  return key;
+}
+
 function handlePressKey(params: PressKeyParams): void {
   // Dispatch to the focused element or document body
   const target = document.activeElement || document.body;
 
   const opts: KeyboardEventInit = {
     key: params.key,
-    code: params.key,
+    code: keyToCode(params.key),
     bubbles: true,
     cancelable: true,
   };
@@ -863,6 +903,12 @@ function handlePressKey(params: PressKeyParams): void {
 
 function handleHover(params: HoverParams): void {
   const el = resolveRef(params.ref);
+
+  // Scroll into view before hovering
+  if (el instanceof HTMLElement) {
+    el.scrollIntoView({ block: 'center', behavior: 'instant' as ScrollBehavior });
+  }
+
   const rect = el.getBoundingClientRect();
   const x = rect.left + rect.width / 2;
   const y = rect.top + rect.height / 2;
@@ -875,6 +921,12 @@ function handleHover(params: HoverParams): void {
     clientY: y,
   };
 
+  // Dispatch pointer events first (modern frameworks rely on these)
+  el.dispatchEvent(new PointerEvent('pointerenter', { ...opts, bubbles: false }));
+  el.dispatchEvent(new PointerEvent('pointerover', opts));
+  el.dispatchEvent(new PointerEvent('pointermove', opts));
+
+  // Then mouse events
   el.dispatchEvent(new MouseEvent('mouseenter', { ...opts, bubbles: false }));
   el.dispatchEvent(new MouseEvent('mouseover', opts));
   el.dispatchEvent(new MouseEvent('mousemove', opts));
@@ -884,93 +936,104 @@ function handleHover(params: HoverParams): void {
 // Fill form handler
 // ============================================================
 
-function handleFillForm(params: FillFormParams): { filledCount: number } {
+function handleFillForm(params: FillFormParams): { filledCount: number; errors?: string[] } {
   let filledCount = 0;
+  const errors: string[] = [];
 
   for (const field of params.fields) {
-    const el = resolveRef(field.ref);
-
-    switch (field.type) {
-      case 'textbox': {
-        if (
-          el instanceof HTMLInputElement ||
-          el instanceof HTMLTextAreaElement
-        ) {
-          el.focus();
-          el.value = field.value;
-          el.dispatchEvent(new InputEvent('input', { data: field.value, inputType: 'insertText', bubbles: true }));
-          el.dispatchEvent(new Event('change', { bubbles: true }));
-        } else if (el instanceof HTMLElement && el.isContentEditable) {
-          el.focus();
-          el.textContent = field.value;
-          el.dispatchEvent(new InputEvent('input', { data: field.value, inputType: 'insertText', bubbles: true }));
-        } else {
-          throw new Error(`Field "${field.name}" (ref ${field.ref}) is not a text input`);
-        }
-        break;
-      }
-
-      case 'checkbox': {
-        if (el instanceof HTMLInputElement && el.type === 'checkbox') {
-          const shouldBeChecked = field.value === 'true';
-          if (el.checked !== shouldBeChecked) {
-            el.click();
-          }
-        } else {
-          throw new Error(`Field "${field.name}" (ref ${field.ref}) is not a checkbox`);
-        }
-        break;
-      }
-
-      case 'radio': {
-        if (el instanceof HTMLInputElement && el.type === 'radio') {
-          if (!el.checked) {
-            el.click();
-          }
-        } else {
-          throw new Error(`Field "${field.name}" (ref ${field.ref}) is not a radio button`);
-        }
-        break;
-      }
-
-      case 'combobox': {
-        if (el instanceof HTMLSelectElement) {
-          // Find the option by text content
-          const option = Array.from(el.options).find(
-            (opt) => opt.textContent?.trim() === field.value || opt.value === field.value,
-          );
-          if (!option) {
-            throw new Error(
-              `Option "${field.value}" not found in select "${field.name}" (ref ${field.ref})`,
-            );
-          }
-          el.value = option.value;
-          el.dispatchEvent(new Event('change', { bubbles: true }));
-        } else {
-          throw new Error(`Field "${field.name}" (ref ${field.ref}) is not a select element`);
-        }
-        break;
-      }
-
-      case 'slider': {
-        if (el instanceof HTMLInputElement && el.type === 'range') {
-          el.value = field.value;
-          el.dispatchEvent(new InputEvent('input', { bubbles: true }));
-          el.dispatchEvent(new Event('change', { bubbles: true }));
-        } else {
-          throw new Error(`Field "${field.name}" (ref ${field.ref}) is not a range input`);
-        }
-        break;
-      }
-
-      default:
-        throw new Error(`Unknown field type: ${field.type}`);
+    let el: Element;
+    try {
+      el = resolveRef(field.ref);
+    } catch (err) {
+      errors.push(`Field "${field.name}" (ref ${field.ref}): ${err instanceof Error ? err.message : String(err)}`);
+      continue;
     }
 
-    filledCount++;
+    try {
+      switch (field.type) {
+        case 'textbox': {
+          if (
+            el instanceof HTMLInputElement ||
+            el instanceof HTMLTextAreaElement
+          ) {
+            el.focus();
+            el.value = field.value;
+            el.dispatchEvent(new InputEvent('input', { data: field.value, inputType: 'insertText', bubbles: true }));
+            el.dispatchEvent(new Event('change', { bubbles: true }));
+          } else if (el instanceof HTMLElement && el.isContentEditable) {
+            el.focus();
+            el.textContent = field.value;
+            el.dispatchEvent(new InputEvent('input', { data: field.value, inputType: 'insertText', bubbles: true }));
+          } else {
+            throw new Error(`not a text input`);
+          }
+          break;
+        }
+
+        case 'checkbox': {
+          if (el instanceof HTMLInputElement && el.type === 'checkbox') {
+            const shouldBeChecked = field.value === 'true';
+            if (el.checked !== shouldBeChecked) {
+              el.click();
+            }
+          } else {
+            throw new Error(`not a checkbox`);
+          }
+          break;
+        }
+
+        case 'radio': {
+          if (el instanceof HTMLInputElement && el.type === 'radio') {
+            if (!el.checked) {
+              el.click();
+            }
+          } else {
+            throw new Error(`not a radio button`);
+          }
+          break;
+        }
+
+        case 'combobox': {
+          if (el instanceof HTMLSelectElement) {
+            const option = Array.from(el.options).find(
+              (opt) => opt.textContent?.trim() === field.value || opt.value === field.value,
+            );
+            if (!option) {
+              throw new Error(`option "${field.value}" not found`);
+            }
+            el.value = option.value;
+            el.dispatchEvent(new InputEvent('input', { bubbles: true }));
+            el.dispatchEvent(new Event('change', { bubbles: true }));
+          } else {
+            throw new Error(`not a select element`);
+          }
+          break;
+        }
+
+        case 'slider': {
+          if (el instanceof HTMLInputElement && el.type === 'range') {
+            el.value = field.value;
+            el.dispatchEvent(new InputEvent('input', { bubbles: true }));
+            el.dispatchEvent(new Event('change', { bubbles: true }));
+          } else {
+            throw new Error(`not a range input`);
+          }
+          break;
+        }
+
+        default:
+          throw new Error(`unknown field type "${field.type}"`);
+      }
+
+      filledCount++;
+    } catch (err) {
+      errors.push(`Field "${field.name}" (ref ${field.ref}): ${err instanceof Error ? err.message : String(err)}`);
+    }
   }
 
-  return { filledCount };
+  const result: { filledCount: number; errors?: string[] } = { filledCount };
+  if (errors.length > 0) result.errors = errors;
+  return result;
 }
 
 // ============================================================
@@ -988,9 +1051,12 @@ function handleSelectOption(params: SelectOptionParams): { selected: string[] } 
 
   const selected: string[] = [];
 
-  // Deselect all options first
-  for (const opt of el.options) {
-    opt.selected = false;
+  // For multi-select, deselect all first. For single-select, setting
+  // a new option automatically deselects the previous one.
+  if (el.multiple) {
+    for (const opt of el.options) {
+      opt.selected = false;
+    }
   }
 
   // Select matching options by text or value
@@ -1016,21 +1082,73 @@ function handleSelectOption(params: SelectOptionParams): { selected: string[] } 
 // Evaluate handler
 // ============================================================
 
-function handleEvaluate(params: EvaluateParams): { value: unknown } {
-  let el: Element | undefined;
+async function handleEvaluate(params: EvaluateParams): Promise<{ value: unknown }> {
+  // If a ref is provided, resolve the element and inject it into the page scope
+  // via a data attribute so the evaluated script can find it.
+  let refSelector: string | undefined;
   if (params.ref) {
-    el = resolveRef(params.ref);
+    const el = resolveRef(params.ref);
+    // Tag the element so the injected script can find it
+    const marker = `__agentfox_eval_${Date.now()}`;
+    el.setAttribute('data-agentfox-eval', marker);
+    refSelector = `[data-agentfox-eval="${marker}"]`;
+    // Clean up the marker after a short delay
+    setTimeout(() => el.removeAttribute('data-agentfox-eval'), 100);
   }
 
-  // Create a function from the string and execute it
-  // The function body is expected to be like: () => { ... } or (element) => { ... }
-  const fn = new Function('return (' + params.function + ')')();
+  // Execute via injected <script> tag to run in the page's main world,
+  // bypassing content script CSP restrictions. This is the standard
+  // pattern for extensions that need to run arbitrary JS in the page context.
+  const result = await new Promise<unknown>((resolve, reject) => {
+    const resultId = `__agentfox_result_${Date.now()}_${Math.random().toString(36).slice(2)}`;
 
-  if (typeof fn !== 'function') {
-    throw new Error('The provided string did not evaluate to a function');
-  }
+    // Listen for the result via a custom event
+    function onResult(event: Event) {
+      const detail = (event as CustomEvent).detail;
+      window.removeEventListener(resultId, onResult);
+      if (detail.error) {
+        reject(new Error(detail.error));
+      } else {
+        resolve(detail.value);
+      }
+    }
+    window.addEventListener(resultId, onResult);
 
-  const result = el ? fn(el) : fn();
+    // Build the script that will run in the page's main world
+    const script = document.createElement('script');
+    script.textContent = `
+      (async () => {
+        try {
+          const fn = (${params.function});
+          if (typeof fn !== 'function') {
+            throw new Error('The provided string did not evaluate to a function');
+          }
+          ${refSelector ? `const el = document.querySelector('${refSelector}');` : ''}
+          const result = ${refSelector ? 'await fn(el)' : 'await fn()'};
+          // Serialize safely -- DOM nodes and circular refs become descriptive strings
+          let value;
+          try {
+            JSON.stringify(result);
+            value = result;
+          } catch {
+            value = String(result);
+          }
+          window.dispatchEvent(new CustomEvent('${resultId}', { detail: { value } }));
+        } catch (err) {
+          window.dispatchEvent(new CustomEvent('${resultId}', { detail: { error: err.message || String(err) } }));
+        }
+      })();
+    `;
+    document.documentElement.appendChild(script);
+    script.remove();
+
+    // Timeout fallback
+    setTimeout(() => {
+      window.removeEventListener(resultId, onResult);
+      reject(new Error('Evaluate timed out after 30 seconds'));
+    }, 30000);
+  });
+
   return { value: result };
 }
 
@@ -1039,6 +1157,13 @@ function handleEvaluate(params: EvaluateParams): { value: unknown } {
 // ============================================================
 
 function handleWaitFor(params: WaitForParams): Promise<{ matched: boolean }> {
+  // Validate that at least one parameter is provided
+  if (!params.text && !params.textGone && !params.time) {
+    return Promise.reject(
+      new Error('At least one of "text", "textGone", or "time" must be provided'),
+    );
+  }
+
   const timeoutMs = params.time ? params.time * 1000 : 30000;
 
   return new Promise((resolve) => {
@@ -1087,6 +1212,7 @@ function handleWaitFor(params: WaitForParams): Promise<{ matched: boolean }> {
       childList: true,
       subtree: true,
       characterData: true,
+      attributes: true,
     });
   });
 }

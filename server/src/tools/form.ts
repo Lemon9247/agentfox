@@ -42,13 +42,12 @@ export const fillFormTool: ToolDefinition = {
 
   formatResult(result: unknown) {
     if (result && typeof result === 'object' && 'filledCount' in result) {
-      const r = result as { filledCount: number };
-      return [
-        {
-          type: 'text' as const,
-          text: `Filled ${r.filledCount} form field(s)`,
-        },
-      ];
+      const r = result as { filledCount: number; errors?: string[] };
+      let text = `Filled ${r.filledCount} form field(s)`;
+      if (r.errors && r.errors.length > 0) {
+        text += `\nErrors (${r.errors.length}):\n${r.errors.map((e) => `  - ${e}`).join('\n')}`;
+      }
+      return [{ type: 'text' as const, text }];
     }
     return [{ type: 'text' as const, text: 'Form fields filled' }];
   },
