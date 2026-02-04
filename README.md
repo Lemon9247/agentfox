@@ -51,13 +51,24 @@ The `setup` command does two things:
 1. Writes a native messaging host manifest to `~/.mozilla/native-messaging-hosts/agentfox.json`
 2. Prints the MCP server config to add to your Claude Code settings
 
-### Load the extension
+### Install the extension
+
+**Option A: Persistent installation (recommended)**
+
+1. Build the extension package: `npm run pack`
+2. Open Firefox and go to `about:addons`
+3. Click the gear icon and select **Install Add-on From File...**
+4. Select `dist/agent_fox-0.1.0.zip`
+
+> Note: Firefox may require the extension to be signed for persistent installation. If you see a signing error, use `about:config` to set `xpinstall.signatures.required` to `false` (Firefox Developer Edition and Nightly only), or use Option B.
+
+**Option B: Temporary installation (development)**
 
 1. Open Firefox and go to `about:debugging#/runtime/this-firefox`
 2. Click **Load Temporary Add-on...**
 3. Select any file in `extension/dist/`
 
-> Temporary add-ons don't persist across Firefox restarts. You'll need to reload after restarting the browser.
+> Temporary add-ons don't persist across Firefox restarts.
 
 ### Configure Claude Code
 
@@ -90,8 +101,18 @@ This is an npm workspaces monorepo. The `shared` package is a build-time depende
 ```bash
 npm run dev     # Watch mode — rebuilds on changes
 npm run build   # One-shot build
+npm run pack    # Package extension as .zip/.xpi
 npm run clean   # Remove all build artifacts
 npm run lint    # Type-check all packages
+npm test        # Run unit tests
+```
+
+### CLI commands
+
+```bash
+npx agentfox setup      # Install NM host manifest and show MCP config
+npx agentfox status     # Check connectivity (NM manifest, MCP server, socket)
+npx agentfox uninstall  # Remove NM host manifest
 ```
 
 ## Security model

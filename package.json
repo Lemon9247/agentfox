@@ -10,7 +10,8 @@
   "scripts": {
     "build": "tsx scripts/build.ts",
     "dev": "tsx scripts/build.ts --watch",
-    "clean": "rm -rf shared/dist server/dist extension/dist **/tsconfig.tsbuildinfo",
+    "pack": "web-ext build --source-dir extension/dist --artifacts-dir dist --overwrite-dest",
+    "clean": "rm -rf shared/dist server/dist extension/dist dist **/tsconfig.tsbuildinfo",
     "lint": "tsc --noEmit --project shared/tsconfig.json && tsc --noEmit --project server/tsconfig.json && tsc --noEmit --project extension/tsconfig.json",
     "test": "vitest run",
     "test:watch": "vitest"
