@@ -9,10 +9,6 @@ import type {
   ContentResponse,
   ActionType,
   TabInfo,
-  NavigateParams,
-  ScreenshotParams,
-  TabsParams,
-  ResizeParams,
 } from '@agentfox/shared';
 
 // ============================================================
@@ -120,7 +116,12 @@ function logError(...args: unknown[]): void {
   console.error('[AgentFox:bg]', ...args);
 }
 
-/** Get the currently active tab in the current window */
+/**
+ * Get the currently active tab in the current window.
+ * Note: `currentWindow: true` means only the browser window the extension
+ * considers "current" is queried. In multi-window setups, this may not be
+ * the window the user is visually focused on.
+ */
 async function getActiveTab(): Promise<browser.Tab> {
   const tabs = await browser.tabs.query({ active: true, currentWindow: true });
   if (!tabs.length || tabs[0].id === undefined) {
@@ -202,31 +203,45 @@ async function forwardToContentScript(
 /** Wait for a tab to finish loading (status === 'complete') */
 function waitForTabLoad(tabId: number, timeoutMs = 30000): Promise<void> {
   return new Promise((resolve, reject) => {
+    function cleanup() {
+      clearTimeout(timeout);
+      browser.tabs.onUpdated.removeListener(onUpdated);
+      browser.tabs.onRemoved.removeListener(onRemoved);
+    }
+
     const timeout = setTimeout(() => {
-      browser.tabs.onUpdated.removeListener(listener);
+      cleanup();
       reject(new Error('Tab load timed out'));
     }, timeoutMs);
 
+    // Reject immediately if the tab is closed during navigation
+    function onRemoved(removedTabId: number) {
+      if (removedTabId === tabId) {
+        cleanup();
+        reject(new Error('Tab was closed during navigation'));
+      }
+    }
+
     // Declare listener with the correct Firefox onUpdated signature
-    function listener(
+    function onUpdated(
       updatedTabId: number,
       changeInfo: { status?: string },
     ) {
       if (updatedTabId === tabId && changeInfo.status === 'complete') {
-        clearTimeout(timeout);
-        browser.tabs.onUpdated.removeListener(listener);
+        cleanup();
         resolve();
       }
     }
 
-    browser.tabs.onUpdated.addListener(listener);
+    browser.tabs.onUpdated.addListener(onUpdated);
+    browser.tabs.onRemoved.addListener(onRemoved);
   });
 }
 
 async function handleNavigate(
   command: Command & { action: 'navigate' },
 ): Promise<{ url: string; title: string }> {
-  const params = command.params as NavigateParams;
+  const { params } = command;
   const tab = await getActiveTab();
   const tabId = tab.id!;
 
@@ -251,8 +266,28 @@ async function handleNavigate(
 async function handleNavigateBack(): Promise<{ url: string; title: string }> {
   const tab = await getActiveTab();
   const tabId = tab.id!;
+  const urlBefore = tab.url || '';
 
   await browser.tabs.goBack(tabId);
+
+  // Brief pause to let any navigation start
+  await new Promise((r) => setTimeout(r, 50));
+
+  // Re-query to check if navigation actually occurred
+  const [checkTab] = await browser.tabs.query({
+    active: true,
+    currentWindow: true,
+  });
+
+  if (checkTab?.url === urlBefore && checkTab?.status === 'complete') {
+    // URL didn't change -- no back history; return current state immediately
+    // instead of waiting for a load event that will never fire
+    return {
+      url: checkTab.url || '',
+      title: checkTab.title || '',
+    };
+  }
+
   await waitForTabLoad(tabId);
 
   const [updatedTab] = await browser.tabs.query({
@@ -269,7 +304,7 @@ async function handleNavigateBack(): Promise<{ url: string; title: string }> {
 async function handleScreenshot(
   command: Command & { action: 'screenshot' },
 ): Promise<{ data: string; mimeType: string }> {
-  const params = command.params as ScreenshotParams;
+  const { params } = command;
   const format = params.type || 'png';
   const mimeType = `image/${format}`;
 
@@ -288,10 +323,12 @@ async function handleScreenshot(
 async function handleTabs(
   command: Command & { action: 'tabs' },
 ): Promise<unknown> {
-  const params = command.params as TabsParams;
+  const { params } = command;
 
   switch (params.action) {
     case 'list': {
+      // Note: only tabs in the current window are listed. Multi-window
+      // workflows are not visible to the agent.
       const allTabs = await browser.tabs.query({ currentWindow: true });
       const tabs: TabInfo[] = allTabs.map((t) => ({
         index: t.index,
@@ -348,20 +385,24 @@ async function handleTabs(
     }
 
     default:
-      throw new Error(`Unknown tabs action: ${(params as TabsParams).action}`);
+      throw new Error(`Unknown tabs action: ${params.action}`);
   }
 }
 
 async function handleClose(): Promise<Record<string, never>> {
-  const tab = await getActiveTab();
-  await browser.tabs.remove(tab.id!);
+  // Delegate to handleTabs to avoid duplicating the close-active-tab logic
+  await handleTabs({
+    id: '',
+    action: 'tabs',
+    params: { action: 'close' },
+  });
   return {};
 }
 
 async function handleResize(
   command: Command & { action: 'resize' },
 ): Promise<Record<string, never>> {
-  const params = command.params as ResizeParams;
+  const { params } = command;
   const tab = await getActiveTab();
   await browser.windows.update(tab.windowId, {
     width: params.width,
@@ -457,21 +498,33 @@ function connect(): void {
     return;
   }
 
-  // Reset reconnect counter on successful connection
-  reconnectAttempts = 0;
+  // Capture the port reference at connection time so listeners don't
+  // depend on the mutable module-level `port` variable (C2 fix)
+  const currentPort = port;
 
-  port.onMessage.addListener((message: unknown) => {
-    // Messages from the native host are Command objects
-    const command = message as Command;
-    if (!command || !command.id || !command.action) {
+  currentPort.onMessage.addListener((message: unknown) => {
+    // Connection is proven healthy once we receive a message (H2 fix)
+    reconnectAttempts = 0;
+
+    // Runtime validation: ensure message is a well-formed Command
+    if (
+      !message ||
+      typeof message !== 'object' ||
+      !('id' in message) ||
+      !('action' in message) ||
+      typeof (message as Record<string, unknown>).id !== 'string' ||
+      typeof (message as Record<string, unknown>).action !== 'string'
+    ) {
       logError('Received malformed command:', message);
       return;
     }
+    const command = message as Command;
+
     // Fire-and-forget: handleCommand manages its own error handling
-    handleCommand(port!, command);
+    handleCommand(currentPort, command);
   });
 
-  port.onDisconnect.addListener((disconnectedPort: browser.Port) => {
+  currentPort.onDisconnect.addListener((disconnectedPort: browser.Port) => {
     const error = disconnectedPort.error;
     logError(
       'Native messaging port disconnected:',
@@ -501,7 +554,7 @@ function scheduleReconnect(): void {
 }
 
 // ============================================================
-// Additional browser type declaration for tabs.onUpdated
+// Additional browser type declarations for tabs events
 // (needed by waitForTabLoad helper)
 // ============================================================
 
@@ -521,6 +574,11 @@ declare namespace browser.tabs {
         tab: browser.Tab,
       ) => void,
     ): void;
+  };
+
+  const onRemoved: {
+    addListener(callback: (tabId: number) => void): void;
+    removeListener(callback: (tabId: number) => void): void;
   };
 }
 
