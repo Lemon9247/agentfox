@@ -17,6 +17,7 @@ const SERVER_NAME = 'agentfox';
 // TODO: read from package.json at build time
 const SERVER_VERSION = '0.1.0';
 const DEFAULT_TIMEOUT_MS = 30_000;
+const CONNECTION_WAIT_MS = 5_000;
 
 // ============================================================
 // Logging — stderr only (stdout is the MCP protocol channel)
@@ -93,16 +94,22 @@ export async function main(): Promise<void> {
       };
     }
 
+    // If not connected, wait briefly for the client to connect.
+    // This handles the race where the MCP server starts before Firefox/NM host.
     if (!ipcServer.connected) {
-      return {
-        content: [
-          {
-            type: 'text',
-            text: 'Browser extension is not connected. Make sure Firefox is running with the Agent Fox extension installed, and the native messaging host is configured.',
-          },
-        ],
-        isError: true,
-      };
+      try {
+        log('Waiting for browser extension to connect...');
+        await ipcServer.waitForConnection(CONNECTION_WAIT_MS);
+        log('Browser extension connected after waiting');
+      } catch {
+        const message = ipcServer.hasEverConnected
+          ? 'Browser extension disconnected. The Firefox extension or native messaging host may have stopped.'
+          : 'Browser extension is not connected. Make sure Firefox is running with the Agent Fox extension installed.';
+        return {
+          content: [{ type: 'text', text: message }],
+          isError: true,
+        };
+      }
     }
 
     // Build the Command for the extension.
