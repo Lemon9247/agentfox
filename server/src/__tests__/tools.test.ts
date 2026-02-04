@@ -24,6 +24,11 @@ describe('tool registry', () => {
       'browser_resize',
       'browser_evaluate',
       'browser_wait_for',
+      'browser_get_cookies',
+      'browser_get_bookmarks',
+      'browser_get_history',
+      'browser_network_requests',
+      'browser_save_pdf',
       'browser_page_content',
     ];
     const actualNames = tools.map((t) => t.name);
@@ -511,7 +516,9 @@ describe('tool action mapping', () => {
       'navigate', 'navigate_back', 'snapshot', 'screenshot',
       'click', 'type', 'press_key', 'hover',
       'fill_form', 'select_option', 'evaluate', 'wait_for',
-      'tabs', 'close', 'resize', 'page_content',
+      'tabs', 'close', 'resize',
+      'get_cookies', 'get_bookmarks', 'get_history',
+      'network_requests', 'save_pdf', 'page_content',
     ]);
     for (const tool of tools) {
       expect(validActions.has(tool.action)).toBe(true);
