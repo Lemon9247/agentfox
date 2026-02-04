@@ -43,6 +43,7 @@ import resizeTool from './resize.js';
 import evaluateTool from './evaluate.js';
 import waitTool from './wait.js';
 import cookiesTool from './cookies.js';
+import bookmarksTool from './bookmarks.js';
 
 /** All registered tool definitions */
 export const tools: ToolDefinition[] = [
@@ -62,6 +63,7 @@ export const tools: ToolDefinition[] = [
   evaluateTool,
   waitTool,
   cookiesTool,
+  bookmarksTool,
 ];
 
 /** Map for O(1) tool lookups by name. Built at module load time. */
