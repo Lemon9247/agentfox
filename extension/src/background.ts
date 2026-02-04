@@ -152,6 +152,26 @@ const CONTENT_SCRIPT_ACTIONS: ReadonlySet<ActionType> = new Set([
 let port: browser.Port | null = null;
 let reconnectAttempts = 0;
 
+/** Buffer of captured network requests */
+let networkRequests: Array<{
+  url: string;
+  method: string;
+  statusCode: number;
+  type: string;
+  timeStamp: number;
+}> = [];
+
+/** Whether we're currently recording network requests */
+let networkRecording = false;
+
+/** The webRequest listener function (stored so we can remove it) */
+let networkListener:
+  | ((details: browser.webRequest.RequestDetails) => void)
+  | null = null;
+
+/** Maximum number of requests to buffer */
+const MAX_NETWORK_REQUESTS = 1000;
+
 // ============================================================
 // Helpers
 // ============================================================
@@ -543,6 +563,74 @@ async function handleGetBookmarks(
 
 
 // ============================================================
+// Network request recording
+// ============================================================
+
+async function handleNetworkRequests(
+  command: Command & { action: 'network_requests' },
+): Promise<{ requests?: Array<{
+  url: string;
+  method: string;
+  statusCode: number;
+  type: string;
+  timeStamp: number;
+}>; recording?: boolean; count?: number }> {
+  const { params } = command;
+
+  switch (params.action) {
+    case 'start': {
+      if (networkRecording) {
+        return { recording: true, count: networkRequests.length };
+      }
+      networkRequests = [];
+      networkListener = (details) => {
+        if (networkRequests.length >= MAX_NETWORK_REQUESTS) return;
+        networkRequests.push({
+          url: details.url,
+          method: details.method,
+          statusCode: details.statusCode || 0,
+          type: details.type,
+          timeStamp: details.timeStamp,
+        });
+      };
+      browser.webRequest.onCompleted.addListener(networkListener, {
+        urls: ['<all_urls>'],
+      });
+      networkRecording = true;
+      return { recording: true, count: 0 };
+    }
+
+    case 'stop': {
+      if (networkListener) {
+        browser.webRequest.onCompleted.removeListener(networkListener);
+        networkListener = null;
+      }
+      networkRecording = false;
+      return { recording: false, count: networkRequests.length };
+    }
+
+    case 'get': {
+      let requests = [...networkRequests];
+      if (params.filter) {
+        const filter = params.filter.toLowerCase();
+        requests = requests.filter((r) =>
+          r.url.toLowerCase().includes(filter),
+        );
+      }
+      return { requests, recording: networkRecording };
+    }
+
+    case 'clear': {
+      networkRequests = [];
+      return { recording: networkRecording, count: 0 };
+    }
+
+    default:
+      throw new Error(`Unknown network action: ${params.action}`);
+  }
+}
+
+// ============================================================
 // Command dispatcher
 // ============================================================
 
@@ -604,6 +692,10 @@ async function handleCommand(
 
       case 'get_history':
         result = await handleGetHistory(command);
+        break;
+
+      case 'network_requests':
+        result = await handleNetworkRequests(command);
         break;
 
       default:
@@ -733,6 +825,32 @@ declare namespace browser.tabs {
   const onRemoved: {
     addListener(callback: (tabId: number) => void): void;
     removeListener(callback: (tabId: number) => void): void;
+  };
+}
+
+// ============================================================
+// Additional browser type declarations for webRequest API
+// (needed by network request recording)
+// ============================================================
+
+declare namespace browser.webRequest {
+  interface RequestDetails {
+    requestId: string;
+    url: string;
+    method: string;
+    type: string;
+    timeStamp: number;
+    statusCode?: number;
+    tabId: number;
+  }
+
+  const onCompleted: {
+    addListener(
+      callback: (details: RequestDetails) => void,
+      filter?: { urls: string[] },
+    ): void;
+    removeListener(callback: (details: RequestDetails) => void): void;
+    hasListener(callback: (details: RequestDetails) => void): boolean;
   };
 }
 

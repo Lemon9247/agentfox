@@ -45,6 +45,7 @@ import waitTool from './wait.js';
 import cookiesTool from './cookies.js';
 import bookmarksTool from './bookmarks.js';
 import historyTool from './history.js';
+import networkTool from './network.js';
 
 /** All registered tool definitions */
 export const tools: ToolDefinition[] = [
@@ -66,6 +67,7 @@ export const tools: ToolDefinition[] = [
   cookiesTool,
   bookmarksTool,
   historyTool,
+  networkTool,
 ];
 
 /** Map for O(1) tool lookups by name. Built at module load time. */

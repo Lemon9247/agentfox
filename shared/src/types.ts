@@ -21,7 +21,8 @@ export type ActionType =
   | 'resize'
   | 'get_cookies'
   | 'get_bookmarks'
-  | 'get_history';
+  | 'get_history'
+  | 'network_requests';
 
 // ============================================================
 // Tool Parameter Types — typed params for each action
@@ -125,6 +126,11 @@ export interface GetHistoryParams {
   endTime?: string;
 }
 
+export interface NetworkRequestsParams {
+  action: 'start' | 'stop' | 'get' | 'clear';
+  filter?: string;
+}
+
 /** No params needed */
 export type EmptyParams = Record<string, never>;
 
@@ -155,7 +161,8 @@ export type Command =
   | CommandBase & { action: 'resize'; params: ResizeParams }
   | CommandBase & { action: 'get_cookies'; params: GetCookiesParams }
   | CommandBase & { action: 'get_bookmarks'; params: GetBookmarksParams }
-  | CommandBase & { action: 'get_history'; params: GetHistoryParams };
+  | CommandBase & { action: 'get_history'; params: GetHistoryParams }
+  | CommandBase & { action: 'network_requests'; params: NetworkRequestsParams };
 
 /** Response from extension back to MCP server */
 export interface CommandResponse {
@@ -272,6 +279,20 @@ export interface HistoryItem {
 
 export interface GetHistoryResult {
   items: HistoryItem[];
+}
+
+export interface NetworkRequestInfo {
+  url: string;
+  method: string;
+  statusCode: number;
+  type: string;
+  timeStamp: number;
+}
+
+export interface NetworkRequestsResult {
+  requests?: NetworkRequestInfo[];
+  recording?: boolean;
+  count?: number;
 }
 
 // ============================================================

@@ -16,6 +16,7 @@
     "cookies",
     "bookmarks",
     "history",
+    "webRequest",
     "<all_urls>"
   ],
   "background": {
