@@ -11,6 +11,7 @@ import {
   handleHover,
   handleFillForm,
   handleSelectOption,
+  handleEvaluate,
   handleWaitFor,
   buildAccessibilityTree,
   resetRefState,
@@ -511,6 +512,50 @@ describe('handleSelectOption', () => {
 
     handleSelectOption({ ref, values: ['Beta'] });
     expect(changed).toBe(true);
+  });
+});
+
+// ============================================================
+// handleEvaluate
+// ============================================================
+
+describe('handleEvaluate', () => {
+  it('executes a simple function and returns the result', async () => {
+    const result = await handleEvaluate({
+      function: '() => 2 + 2',
+    });
+    expect(result).toEqual({ value: 4 });
+  });
+
+  it('executes an async function', async () => {
+    const result = await handleEvaluate({
+      function: 'async () => "hello"',
+    });
+    expect(result).toEqual({ value: 'hello' });
+  });
+
+  it('passes element when ref is provided', async () => {
+    document.body.innerHTML = '<button id="target" data-val="42">Click me</button>';
+    const ref = snapshotAndGetRef('target');
+
+    const result = await handleEvaluate({
+      function: '(el) => el.getAttribute("data-val")',
+      ref,
+    });
+    expect(result).toEqual({ value: '42' });
+  });
+
+  it('throws on invalid ref', async () => {
+    await expect(handleEvaluate({
+      function: '(el) => el.textContent',
+      ref: 'e9999',
+    })).rejects.toThrow('not found');
+  });
+
+  it('returns error for non-function expression', async () => {
+    await expect(handleEvaluate({
+      function: '"not a function"',
+    })).rejects.toThrow('did not evaluate to a function');
   });
 });
 
