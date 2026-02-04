@@ -8,9 +8,9 @@
     "extension"
   ],
   "scripts": {
-    "build": "npx tsx scripts/build.ts",
-    "dev": "npx tsx scripts/build.ts --watch",
-    "clean": "rm -rf shared/dist server/dist extension/dist",
+    "build": "tsx scripts/build.ts",
+    "dev": "tsx scripts/build.ts --watch",
+    "clean": "rm -rf shared/dist server/dist extension/dist **/tsconfig.tsbuildinfo",
     "lint": "tsc --noEmit --project shared/tsconfig.json && tsc --noEmit --project server/tsconfig.json && tsc --noEmit --project extension/tsconfig.json"
   },
   "devDependencies": {

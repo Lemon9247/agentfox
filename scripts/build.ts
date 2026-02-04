@@ -1,5 +1,5 @@
 import * as esbuild from 'esbuild';
-import { cpSync, mkdirSync } from 'fs';
+import { cpSync, existsSync, mkdirSync } from 'fs';
 import { resolve, dirname } from 'path';
 import { fileURLToPath } from 'url';
 
@@ -40,10 +40,27 @@ const serverConfig: esbuild.BuildOptions = {
   },
 };
 
+function copyStaticFiles() {
+  const extDist = resolve(ROOT, 'extension/dist');
+  mkdirSync(extDist, { recursive: true });
+
+  cpSync(
+    resolve(ROOT, 'extension/manifest.json'),
+    resolve(extDist, 'manifest.json'),
+  );
+
+  const iconsDir = resolve(ROOT, 'extension/icons');
+  if (existsSync(iconsDir)) {
+    cpSync(iconsDir, resolve(extDist, 'icons'), { recursive: true });
+  }
+}
+
 async function build() {
-  // Ensure output dirs exist
   mkdirSync(resolve(ROOT, 'extension/dist'), { recursive: true });
   mkdirSync(resolve(ROOT, 'server/dist'), { recursive: true });
+
+  // Always copy static files (needed for both watch and production)
+  copyStaticFiles();
 
   if (watching) {
     const extCtx = await esbuild.context(extensionConfig);
@@ -55,21 +72,6 @@ async function build() {
       esbuild.build(extensionConfig),
       esbuild.build(serverConfig),
     ]);
-
-    // Copy extension static files to dist
-    cpSync(
-      resolve(ROOT, 'extension/manifest.json'),
-      resolve(ROOT, 'extension/dist/manifest.json'),
-    );
-
-    const iconsDir = resolve(ROOT, 'extension/icons');
-    const distIconsDir = resolve(ROOT, 'extension/dist/icons');
-    try {
-      cpSync(iconsDir, distIconsDir, { recursive: true });
-    } catch {
-      // Icons may not exist yet
-    }
-
     console.log('Build complete.');
   }
 }

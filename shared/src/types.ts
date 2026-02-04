@@ -20,53 +20,6 @@ export type ActionType =
   | 'close'
   | 'resize';
 
-/** Command sent from MCP server to extension via native messaging */
-export interface Command {
-  id: string;
-  action: ActionType;
-  params: Record<string, unknown>;
-}
-
-/** Response from extension back to MCP server */
-export interface CommandResponse {
-  id: string;
-  success: boolean;
-  result?: unknown;
-  error?: string;
-}
-
-// ============================================================
-// Accessibility Tree — page representation for AI agents
-// ============================================================
-
-/** A node in the accessibility tree sent in snapshot responses */
-export interface AccessibilityNode {
-  /** ARIA role or semantic role (button, link, textbox, heading, etc.) */
-  role: string;
-  /** Accessible name (text content, aria-label, alt text, etc.) */
-  name: string;
-  /** Unique ref ID for interactive elements (e.g., "e1", "e2") */
-  ref?: string;
-  /** Current value for form elements */
-  value?: string;
-  /** Heading level (1-6) for heading roles */
-  level?: number;
-  /** Checkbox/radio checked state */
-  checked?: boolean;
-  /** Whether the element is disabled */
-  disabled?: boolean;
-  /** Whether a collapsible element is expanded */
-  expanded?: boolean;
-  /** Whether an option is selected */
-  selected?: boolean;
-  /** Whether the element is required */
-  required?: boolean;
-  /** Description text (aria-describedby, title, etc.) */
-  description?: string;
-  /** Child nodes */
-  children?: AccessibilityNode[];
-}
-
 // ============================================================
 // Tool Parameter Types — typed params for each action
 // ============================================================
@@ -127,14 +80,13 @@ export interface EvaluateParams {
   element?: string;
 }
 
-export interface WaitForParams {
-  /** Text to wait for to appear */
-  text?: string;
-  /** Text to wait for to disappear */
-  textGone?: string;
-  /** Time to wait in seconds */
-  time?: number;
-}
+/** At least one of text, textGone, or time must be provided */
+export type WaitForParams =
+  | { text: string; textGone?: undefined; time?: undefined }
+  | { text?: undefined; textGone: string; time?: undefined }
+  | { text?: undefined; textGone?: undefined; time: number }
+  | { text: string; time: number; textGone?: undefined }
+  | { textGone: string; time: number; text?: undefined };
 
 export interface TabsParams {
   action: 'list' | 'new' | 'close' | 'select';
@@ -153,6 +105,75 @@ export interface ScreenshotParams {
 export interface ResizeParams {
   width: number;
   height: number;
+}
+
+/** No params needed */
+export type EmptyParams = Record<string, never>;
+
+// ============================================================
+// Command — discriminated union keyed on action
+// ============================================================
+
+interface CommandBase {
+  id: string;
+}
+
+/** Command sent from MCP server to extension via native messaging */
+export type Command =
+  | CommandBase & { action: 'navigate'; params: NavigateParams }
+  | CommandBase & { action: 'navigate_back'; params: EmptyParams }
+  | CommandBase & { action: 'snapshot'; params: EmptyParams }
+  | CommandBase & { action: 'screenshot'; params: ScreenshotParams }
+  | CommandBase & { action: 'click'; params: ClickParams }
+  | CommandBase & { action: 'type'; params: TypeParams }
+  | CommandBase & { action: 'press_key'; params: PressKeyParams }
+  | CommandBase & { action: 'hover'; params: HoverParams }
+  | CommandBase & { action: 'fill_form'; params: FillFormParams }
+  | CommandBase & { action: 'select_option'; params: SelectOptionParams }
+  | CommandBase & { action: 'evaluate'; params: EvaluateParams }
+  | CommandBase & { action: 'wait_for'; params: WaitForParams }
+  | CommandBase & { action: 'tabs'; params: TabsParams }
+  | CommandBase & { action: 'close'; params: EmptyParams }
+  | CommandBase & { action: 'resize'; params: ResizeParams };
+
+/** Response from extension back to MCP server */
+export interface CommandResponse {
+  id: string;
+  success: boolean;
+  result?: unknown;
+  error?: string;
+}
+
+// ============================================================
+// Accessibility Tree — page representation for AI agents
+// ============================================================
+
+/** A node in the accessibility tree sent in snapshot responses */
+export interface AccessibilityNode {
+  /** ARIA role or semantic role (button, link, textbox, heading, etc.) */
+  role: string;
+  /** Accessible name (text content, aria-label, alt text, etc.) */
+  name: string;
+  /** Unique ref ID for interactive elements (e.g., "e1", "e2") */
+  ref?: string;
+  /** Current value for form elements */
+  value?: string;
+  /** Heading level (1-6) for heading roles */
+  level?: number;
+  /** Checkbox/radio checked state */
+  checked?: boolean;
+  /** Whether the element is disabled */
+  disabled?: boolean;
+  /** Whether a collapsible element is expanded */
+  expanded?: boolean;
+  /** Whether an option is selected */
+  selected?: boolean;
+  /** Whether the element is required */
+  required?: boolean;
+  /** Description text (aria-describedby, title, etc.) */
+  description?: string;
+  /** Child nodes */
+  children?: AccessibilityNode[];
 }
 
 // ============================================================
@@ -200,21 +221,21 @@ export interface WaitForResult {
 // ============================================================
 
 /** Message sent over the Unix socket between MCP server and NM host */
-export interface IpcMessage {
-  type: 'command' | 'response' | 'ping' | 'pong';
-  payload: Command | CommandResponse | null;
-}
+export type IpcMessage =
+  | { type: 'command'; payload: Command }
+  | { type: 'response'; payload: CommandResponse }
+  | { type: 'ping'; payload: null }
+  | { type: 'pong'; payload: null };
 
 // ============================================================
 // Extension Internal Messages — between background and content
 // ============================================================
 
 /** Message from background script to content script */
-export interface ContentRequest {
+export interface ContentRequest extends CommandBase {
   type: 'content-request';
-  id: string;
   action: ActionType;
-  params: Record<string, unknown>;
+  params: Command['params'];
 }
 
 /** Response from content script to background script */
