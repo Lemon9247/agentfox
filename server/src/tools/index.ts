@@ -47,6 +47,7 @@ import bookmarksTool from './bookmarks.js';
 import historyTool from './history.js';
 import networkTool from './network.js';
 import pdfTool from './pdf.js';
+import pageContentTool from './page-content.js';
 
 /** All registered tool definitions */
 export const tools: ToolDefinition[] = [
@@ -70,6 +71,7 @@ export const tools: ToolDefinition[] = [
   historyTool,
   networkTool,
   pdfTool,
+  pageContentTool,
 ];
 
 /** Map for O(1) tool lookups by name. Built at module load time. */

@@ -143,6 +143,7 @@ const CONTENT_SCRIPT_ACTIONS: ReadonlySet<ActionType> = new Set([
   'select_option',
   'evaluate',
   'wait_for',
+  'page_content',
 ]);
 
 // ============================================================
