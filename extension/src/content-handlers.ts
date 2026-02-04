@@ -1069,6 +1069,10 @@ export function handleSelectOption(params: SelectOptionParams): { selected: stri
 // ============================================================
 // Evaluate handler
 // ============================================================
+// Security note: This handler injects a <script> tag into the page's main world,
+// giving the evaluated code full page-context privileges (equivalent to the dev console).
+// This bypasses CSP restrictions that block new Function() in the content script's
+// isolated world. The trust model is that the MCP client is trusted -- see README.md.
 
 export async function handleEvaluate(params: EvaluateParams): Promise<{ value: unknown }> {
   // If a ref is provided, resolve the element and inject it into the page scope

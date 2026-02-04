@@ -94,6 +94,24 @@ npm run clean   # Remove all build artifacts
 npm run lint    # Type-check all packages
 ```
 
+## Security model
+
+Agent Fox is a personal tool designed for use on your own machine. It gives the MCP client (e.g., Claude Code) full control over your browser, including the ability to execute arbitrary JavaScript on any page via `browser_evaluate`.
+
+### How `browser_evaluate` works
+
+The evaluate tool injects a `<script>` tag into the page's main world. This is necessary because content scripts run in an isolated world where `new Function()` is blocked by Content Security Policy on most sites. The injected script pattern is a standard WebExtension technique, but it means:
+
+- **Evaluated code runs with full page privileges.** It can access the page's JS context, cookies (via `document.cookie`), and DOM. This is equivalent to running code in the browser's developer console.
+- **Results are communicated back via `CustomEvent`.** The injected script dispatches a custom event that the content script listens for, so results cross the main-world/isolated-world boundary safely.
+- **DOM nodes and circular references are handled.** Non-JSON-serializable return values are converted to strings rather than throwing.
+
+### Trust boundary
+
+The trust model is: **you trust the MCP client.** Agent Fox does not add sandboxing or permission prompts beyond what the MCP protocol itself provides. If you wouldn't type a command in the browser console, don't let the agent run it via `browser_evaluate`.
+
+This is appropriate for a personal tool where you're supervising the agent. It would not be appropriate for a multi-tenant or untrusted-client deployment without additional access controls.
+
 ## Status
 
 Active development. The core pipeline works end-to-end with a full set of interaction tools — navigation, clicking, typing, form filling, tab management, JavaScript evaluation, and more.
