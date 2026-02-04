@@ -15,8 +15,20 @@ The MCP server exposes browser tools over the [Model Context Protocol](https://m
 | Tool | Description |
 |------|-------------|
 | `browser_navigate` | Navigate to a URL |
+| `browser_navigate_back` | Go back to the previous page |
 | `browser_snapshot` | Get the page's accessibility tree (text-based, like Playwright MCP) |
 | `browser_take_screenshot` | Capture a screenshot of the visible tab |
+| `browser_click` | Click an element on the page |
+| `browser_type` | Type text into an editable element |
+| `browser_press_key` | Press a keyboard key |
+| `browser_hover` | Hover over an element |
+| `browser_fill_form` | Fill multiple form fields at once |
+| `browser_select_option` | Select an option in a dropdown |
+| `browser_tabs` | List, create, close, or select browser tabs |
+| `browser_close` | Close the current tab |
+| `browser_resize` | Resize the browser window |
+| `browser_evaluate` | Evaluate JavaScript on the page or an element |
+| `browser_wait_for` | Wait for text to appear/disappear or a timeout |
 
 ## Prerequisites
 
@@ -84,4 +96,4 @@ npm run lint    # Type-check all packages
 
 ## Status
 
-Early development. The core pipeline works end-to-end but the tool set is minimal. Future work includes click/type interactions, form filling, and element selection.
+Active development. The core pipeline works end-to-end with a full set of interaction tools — navigation, clicking, typing, form filling, tab management, JavaScript evaluation, and more.
