@@ -4,6 +4,7 @@
   "private": true,
   "type": "module",
   "bin": {
+    "agentfox": "bin/agentfox",
     "agentfox-mcp": "bin/agentfox-mcp",
     "agentfox-nm-host": "bin/agentfox-nm-host"
   },
