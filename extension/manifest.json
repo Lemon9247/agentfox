@@ -15,6 +15,7 @@
     "activeTab",
     "cookies",
     "bookmarks",
+    "history",
     "<all_urls>"
   ],
   "background": {

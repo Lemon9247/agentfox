@@ -20,7 +20,8 @@ export type ActionType =
   | 'close'
   | 'resize'
   | 'get_cookies'
-  | 'get_bookmarks';
+  | 'get_bookmarks'
+  | 'get_history';
 
 // ============================================================
 // Tool Parameter Types — typed params for each action
@@ -117,6 +118,13 @@ export interface GetBookmarksParams {
   query?: string;
 }
 
+export interface GetHistoryParams {
+  query?: string;
+  maxResults?: number;
+  startTime?: string;
+  endTime?: string;
+}
+
 /** No params needed */
 export type EmptyParams = Record<string, never>;
 
@@ -146,7 +154,8 @@ export type Command =
   | CommandBase & { action: 'close'; params: EmptyParams }
   | CommandBase & { action: 'resize'; params: ResizeParams }
   | CommandBase & { action: 'get_cookies'; params: GetCookiesParams }
-  | CommandBase & { action: 'get_bookmarks'; params: GetBookmarksParams };
+  | CommandBase & { action: 'get_bookmarks'; params: GetBookmarksParams }
+  | CommandBase & { action: 'get_history'; params: GetHistoryParams };
 
 /** Response from extension back to MCP server */
 export interface CommandResponse {
@@ -252,6 +261,17 @@ export interface BookmarkInfo {
 
 export interface GetBookmarksResult {
   bookmarks: BookmarkInfo[];
+}
+
+export interface HistoryItem {
+  url: string;
+  title: string;
+  visitCount: number;
+  lastVisitTime: number;
+}
+
+export interface GetHistoryResult {
+  items: HistoryItem[];
 }
 
 // ============================================================

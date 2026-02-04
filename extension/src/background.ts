@@ -107,6 +107,21 @@ declare namespace browser {
     function search(query: string | { query?: string }): Promise<BookmarkTreeNode[]>;
     function getRecent(numberOfItems: number): Promise<BookmarkTreeNode[]>;
   }
+
+  namespace history {
+    interface HistoryItem {
+      url: string;
+      title: string;
+      visitCount: number;
+      lastVisitTime: number;
+    }
+    function search(query: {
+      text: string;
+      startTime?: number;
+      endTime?: number;
+      maxResults?: number;
+    }): Promise<HistoryItem[]>;
+  }
 }
 
 // ============================================================
@@ -480,6 +495,28 @@ async function handleGetCookies(
   };
 }
 
+async function handleGetHistory(
+  command: Command & { action: 'get_history' },
+): Promise<{ items: Array<{ url: string; title: string; visitCount: number; lastVisitTime: number }> }> {
+  const { params } = command;
+  const searchParams: { text: string; startTime?: number; endTime?: number; maxResults?: number } = {
+    text: params.query || '',
+    maxResults: params.maxResults || 50,
+  };
+  if (params.startTime) searchParams.startTime = new Date(params.startTime).getTime();
+  if (params.endTime) searchParams.endTime = new Date(params.endTime).getTime();
+
+  const items = await browser.history.search(searchParams);
+  return {
+    items: items.map(item => ({
+      url: item.url || '',
+      title: item.title || '',
+      visitCount: item.visitCount || 0,
+      lastVisitTime: item.lastVisitTime || 0,
+    })),
+  };
+}
+
 async function handleGetBookmarks(
   command: Command & { action: 'get_bookmarks' },
 ): Promise<{ bookmarks: Array<{ id: string; title: string; url?: string; dateAdded?: number }> }> {
@@ -503,6 +540,7 @@ async function handleGetBookmarks(
       })),
   };
 }
+
 
 // ============================================================
 // Command dispatcher
@@ -562,6 +600,10 @@ async function handleCommand(
 
       case 'get_bookmarks':
         result = await handleGetBookmarks(command);
+        break;
+
+      case 'get_history':
+        result = await handleGetHistory(command);
         break;
 
       default:
