@@ -422,6 +422,28 @@ async function handleResize(
   return {};
 }
 
+async function handleSavePdf(
+  command: Command & { action: 'save_pdf' },
+): Promise<{ saved: boolean; status: string }> {
+  const { params } = command;
+  const pageSettings: {
+    headerLeft?: string;
+    headerRight?: string;
+    footerLeft?: string;
+    footerRight?: string;
+  } = {};
+  if (params.headerLeft) pageSettings.headerLeft = params.headerLeft;
+  if (params.headerRight) pageSettings.headerRight = params.headerRight;
+  if (params.footerLeft) pageSettings.footerLeft = params.footerLeft;
+  if (params.footerRight) pageSettings.footerRight = params.footerRight;
+
+  const status = await browser.tabs.saveAsPDF(pageSettings);
+  return {
+    saved: status === 'saved' || status === 'replaced',
+    status,
+  };
+}
+
 // ============================================================
 // Command dispatcher
 // ============================================================
@@ -472,6 +494,10 @@ async function handleCommand(
 
       case 'resize':
         result = await handleResize(command);
+        break;
+
+      case 'save_pdf':
+        result = await handleSavePdf(command);
         break;
 
       default:
@@ -602,6 +628,13 @@ declare namespace browser.tabs {
     addListener(callback: (tabId: number) => void): void;
     removeListener(callback: (tabId: number) => void): void;
   };
+
+  function saveAsPDF(pageSettings: {
+    headerLeft?: string;
+    headerRight?: string;
+    footerLeft?: string;
+    footerRight?: string;
+  }): Promise<string>;
 }
 
 // ============================================================

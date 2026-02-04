@@ -18,7 +18,8 @@ export type ActionType =
   | 'wait_for'
   | 'tabs'
   | 'close'
-  | 'resize';
+  | 'resize'
+  | 'save_pdf';
 
 // ============================================================
 // Tool Parameter Types — typed params for each action
@@ -107,6 +108,13 @@ export interface ResizeParams {
   height: number;
 }
 
+export interface SavePdfParams {
+  headerLeft?: string;
+  headerRight?: string;
+  footerLeft?: string;
+  footerRight?: string;
+}
+
 /** No params needed */
 export type EmptyParams = Record<string, never>;
 
@@ -134,7 +142,8 @@ export type Command =
   | CommandBase & { action: 'wait_for'; params: WaitForParams }
   | CommandBase & { action: 'tabs'; params: TabsParams }
   | CommandBase & { action: 'close'; params: EmptyParams }
-  | CommandBase & { action: 'resize'; params: ResizeParams };
+  | CommandBase & { action: 'resize'; params: ResizeParams }
+  | CommandBase & { action: 'save_pdf'; params: SavePdfParams };
 
 /** Response from extension back to MCP server */
 export interface CommandResponse {
@@ -214,6 +223,11 @@ export interface EvaluateResult {
 
 export interface WaitForResult {
   matched: boolean;
+}
+
+export interface SavePdfResult {
+  saved: boolean;
+  status: string;
 }
 
 // ============================================================

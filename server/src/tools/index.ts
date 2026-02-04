@@ -42,6 +42,7 @@ import closeTool from './close.js';
 import resizeTool from './resize.js';
 import evaluateTool from './evaluate.js';
 import waitTool from './wait.js';
+import pdfTool from './pdf.js';
 
 /** All registered tool definitions */
 export const tools: ToolDefinition[] = [
@@ -60,6 +61,7 @@ export const tools: ToolDefinition[] = [
   resizeTool,
   evaluateTool,
   waitTool,
+  pdfTool,
 ];
 
 /** Map for O(1) tool lookups by name. Built at module load time. */
