@@ -1,1 +1,7 @@
+node_modules
+dist
 /scratchpad
+*.js.map
+*.tsbuildinfo
+.DS_Store
+web-ext-artifacts

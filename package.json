@@ -1,0 +1,23 @@
+{
+  "name": "agentfox",
+  "version": "0.1.0",
+  "private": true,
+  "workspaces": [
+    "shared",
+    "server",
+    "extension"
+  ],
+  "scripts": {
+    "build": "npx tsx scripts/build.ts",
+    "dev": "npx tsx scripts/build.ts --watch",
+    "clean": "rm -rf shared/dist server/dist extension/dist",
+    "lint": "tsc --noEmit --project shared/tsconfig.json && tsc --noEmit --project server/tsconfig.json && tsc --noEmit --project extension/tsconfig.json"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "esbuild": "^0.24.0",
+    "tsx": "^4.0.0",
+    "typescript": "^5.7.0",
+    "web-ext": "^8.0.0"
+  }
+}
