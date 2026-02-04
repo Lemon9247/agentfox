@@ -106,7 +106,6 @@ if (typeof Element.prototype.scrollIntoView === 'undefined') {
 // When content-handlers.ts uses `view: window`, jsdom rejects it because the module's
 // `window` reference doesn't pass jsdom's instanceof check. We patch both constructors
 // to strip the `view` property.
-const OrigMouseEvent = globalThis.MouseEvent;
 (globalThis as any).MouseEvent = class PatchedMouseEvent extends Event {
   readonly clientX: number;
   readonly clientY: number;

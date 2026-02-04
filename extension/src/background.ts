@@ -241,6 +241,15 @@ function waitForTabLoad(tabId: number, timeoutMs = 30000): Promise<void> {
 
     browser.tabs.onUpdated.addListener(onUpdated);
     browser.tabs.onRemoved.addListener(onRemoved);
+
+    // Check if already complete (handles about:blank, cached pages)
+    browser.tabs.query({ currentWindow: true }).then(tabs => {
+      const tab = tabs.find(t => t.id === tabId);
+      if (tab?.status === 'complete') {
+        cleanup();
+        resolve();
+      }
+    });
   });
 }
 
@@ -542,6 +551,7 @@ function connect(): void {
   });
 
   log('Connected to native host.');
+  reconnectAttempts = 0;
 
   // Update browser action badge to show connected status
   browser.browserAction.setBadgeText({ text: 'ON' });

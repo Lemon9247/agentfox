@@ -513,13 +513,15 @@ function truncateText(text: string): string {
 
 /**
  * Estimate the JSON byte size contribution of a node.
- * Accounts for role, name, value, and structural overhead (braces, commas, keys).
+ * Accounts for role, name, value, ref, description, and structural overhead.
  */
-function estimateNodeBytes(name: string, value?: string): number {
-  // Base overhead: {"role":"...","name":"..."} + commas, children key, brackets
-  let estimate = 50;
+function estimateNodeBytes(name: string, value?: string, interactive?: boolean, description?: string): number {
+  // Base overhead: {"role":"...","name":"..."} + commas, children key, brackets, state props
+  let estimate = 80;
   estimate += name.length;
   if (value) estimate += value.length;
+  if (interactive) estimate += 10; // ref field like "ref":"e123"
+  if (description) estimate += description.length;
   return estimate;
 }
 
@@ -647,9 +649,12 @@ export function buildNode(el: Element, depth: number): AccessibilityNode | null 
     name,
   };
 
-  // Track estimated size contribution
+  // Compute value and state properties
   const value = getValue(el);
-  estimatedBytes += estimateNodeBytes(name, value !== undefined ? value : undefined);
+  const state = getElementState(el);
+
+  // Track estimated size contribution (after computing state for accuracy)
+  estimatedBytes += estimateNodeBytes(name, value !== undefined ? value : undefined, interactive, state.description);
 
   // Assign ref for interactive elements
   if (interactive) {
@@ -670,11 +675,10 @@ export function buildNode(el: Element, depth: number): AccessibilityNode | null 
     }
   }
 
-  // Value (already computed above for size estimation)
+  // Value
   if (value !== undefined) node.value = value;
 
   // State properties
-  const state = getElementState(el);
   if (state.checked !== undefined) node.checked = state.checked;
   if (state.disabled !== undefined) node.disabled = state.disabled;
   if (state.expanded !== undefined) node.expanded = state.expanded;
@@ -886,7 +890,6 @@ export async function handleType(params: TypeParams): Promise<void> {
       for (const char of params.text) {
         el.value += char;
         el.dispatchEvent(new KeyboardEvent('keydown', { key: char, bubbles: true }));
-        el.dispatchEvent(new KeyboardEvent('keypress', { key: char, bubbles: true }));
         el.dispatchEvent(new InputEvent('input', { data: char, inputType: 'insertText', bubbles: true }));
         el.dispatchEvent(new KeyboardEvent('keyup', { key: char, bubbles: true }));
         // Small delay between characters
@@ -937,9 +940,6 @@ export async function handleType(params: TypeParams): Promise<void> {
   if (params.submit) {
     el.dispatchEvent(
       new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', bubbles: true }),
-    );
-    el.dispatchEvent(
-      new KeyboardEvent('keypress', { key: 'Enter', code: 'Enter', bubbles: true }),
     );
     el.dispatchEvent(
       new KeyboardEvent('keyup', { key: 'Enter', code: 'Enter', bubbles: true }),
@@ -1191,18 +1191,19 @@ export async function handleEvaluate(params: EvaluateParams): Promise<{ value: u
     const marker = `__agentfox_eval_${Date.now()}`;
     el.setAttribute('data-agentfox-eval', marker);
     refSelector = `[data-agentfox-eval="${marker}"]`;
-    // Clean up the marker after a short delay
-    setTimeout(() => el.removeAttribute('data-agentfox-eval'), 100);
   }
 
   // Execute via injected <script> tag to run in the page's main world,
   // bypassing content script CSP restrictions. This is the standard
   // pattern for extensions that need to run arbitrary JS in the page context.
   const result = await new Promise<unknown>((resolve, reject) => {
-    const resultId = `__agentfox_result_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+    const resultId = `__agentfox_result_${crypto.randomUUID()}`;
+
+    let timeoutId: ReturnType<typeof setTimeout>;
 
     // Listen for the result via a custom event
     function onResult(event: Event) {
+      clearTimeout(timeoutId);
       const detail = (event as CustomEvent).detail;
       window.removeEventListener(resultId, onResult);
       if (detail.error) {
@@ -1222,7 +1223,7 @@ export async function handleEvaluate(params: EvaluateParams): Promise<{ value: u
           if (typeof fn !== 'function') {
             throw new Error('The provided string did not evaluate to a function');
           }
-          ${refSelector ? `const el = document.querySelector('${refSelector}');` : ''}
+          ${refSelector ? `const el = document.querySelector('${refSelector}');\n          if (el) el.removeAttribute('data-agentfox-eval');` : ''}
           const result = ${refSelector ? 'await fn(el)' : 'await fn()'};
           // Serialize safely -- DOM nodes, circular refs, and oversized results
           let value;
@@ -1260,7 +1261,7 @@ export async function handleEvaluate(params: EvaluateParams): Promise<{ value: u
     script.remove();
 
     // Timeout fallback
-    setTimeout(() => {
+    timeoutId = setTimeout(() => {
       window.removeEventListener(resultId, onResult);
       reject(new Error('Evaluate timed out after 30 seconds'));
     }, 30000);
@@ -1369,7 +1370,8 @@ export function isContentRequest(message: unknown): message is ContentRequest {
     'type' in message &&
     (message as ContentRequest).type === 'content-request' &&
     'id' in message &&
-    'action' in message
+    'action' in message &&
+    'params' in message
   );
 }
 
@@ -1441,7 +1443,7 @@ export async function processRequest(
         break;
 
       case 'evaluate':
-        result = handleEvaluate(params as EvaluateParams);
+        result = await handleEvaluate(params as EvaluateParams);
         break;
 
       case 'wait_for':

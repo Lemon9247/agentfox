@@ -276,7 +276,9 @@ export class IpcServer extends EventEmitter<IpcServerEvents> {
           this.client.destroy();
         }
       }, IpcServer.PONG_TIMEOUT_MS);
+      this.pongTimeout.unref();
     }, IpcServer.HEARTBEAT_INTERVAL_MS);
+    this.heartbeatInterval.unref();
   }
 
   /** Stop the heartbeat interval and clear pending pong timer. */

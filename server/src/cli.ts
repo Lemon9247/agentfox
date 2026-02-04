@@ -123,7 +123,7 @@ function setup(): void {
     console.log('To install the extension:');
     if (!existsSync(extensionDistDir)) {
       console.warn(`  Warning: Extension dist not found at ${extensionDistDir}`);
-      console.warn('  You may need to build the extension first: pnpm build');
+      console.warn('  You may need to build the extension first: npm run build');
     } else {
       console.log(`  1. Open Firefox and navigate to about:debugging#/runtime/this-firefox`);
       console.log(`  2. Click "Load Temporary Add-on..."`);
