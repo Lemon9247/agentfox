@@ -645,4 +645,91 @@ describe('buildNode', () => {
     document.body.appendChild(el);
     expect(buildNode(el, 101)).toBeNull();
   });
+
+  it('traverses open shadow DOM children', () => {
+    const host = document.createElement('div');
+    const shadow = host.attachShadow({ mode: 'open' });
+    const btn = document.createElement('button');
+    btn.textContent = 'Shadow Button';
+    shadow.appendChild(btn);
+    document.body.appendChild(host);
+
+    const node = buildNode(host, 0);
+    expect(node).not.toBeNull();
+    // The shadow DOM button should appear in the tree
+    const allNames = JSON.stringify(node);
+    expect(allNames).toContain('Shadow Button');
+  });
+
+  it('handles elements with both light DOM and shadow DOM children', () => {
+    const host = document.createElement('div');
+    host.setAttribute('role', 'region');
+    host.setAttribute('aria-label', 'Host');
+    // Light DOM child (note: with shadow DOM, light DOM children are slotted,
+    // but childNodes still iterates them)
+    const lightChild = document.createElement('span');
+    lightChild.textContent = 'Light text';
+    host.appendChild(lightChild);
+    // Shadow DOM
+    const shadow = host.attachShadow({ mode: 'open' });
+    const shadowChild = document.createElement('span');
+    shadowChild.textContent = 'Shadow text';
+    shadow.appendChild(shadowChild);
+    document.body.appendChild(host);
+
+    const node = buildNode(host, 0);
+    expect(node).not.toBeNull();
+    const allNames = JSON.stringify(node);
+    expect(allNames).toContain('Shadow text');
+  });
+
+  it('handles iframe elements (jsdom stub)', () => {
+    // jsdom doesn't fully support iframe contentDocument, but we can verify
+    // that IFRAME is no longer skipped and the node is created
+    const iframe = document.createElement('iframe');
+    iframe.setAttribute('title', 'Embedded content');
+    document.body.appendChild(iframe);
+
+    const node = buildNode(iframe, 0);
+    expect(node).not.toBeNull();
+    expect(node!.role).toBe('document');
+    expect(node!.name).toBe('Embedded content');
+  });
+
+  it('uses aria-label for iframe accessible name', () => {
+    const iframe = document.createElement('iframe');
+    iframe.setAttribute('aria-label', 'Widget frame');
+    document.body.appendChild(iframe);
+
+    const node = buildNode(iframe, 0);
+    expect(node).not.toBeNull();
+    expect(node!.name).toBe('Widget frame');
+  });
+
+  it('assigns aria-level to custom heading elements', () => {
+    const el = document.createElement('div');
+    el.setAttribute('role', 'heading');
+    el.setAttribute('aria-level', '3');
+    el.setAttribute('aria-label', 'Custom Heading');
+    document.body.appendChild(el);
+
+    const node = buildNode(el, 0);
+    expect(node).not.toBeNull();
+    expect(node!.role).toBe('heading');
+    expect(node!.level).toBe(3);
+    expect(node!.name).toBe('Custom Heading');
+  });
+
+  it('prefers tag-based level over aria-level for native headings', () => {
+    const el = document.createElement('h2');
+    el.setAttribute('aria-level', '5');
+    el.textContent = 'Native Heading';
+    document.body.appendChild(el);
+
+    const node = buildNode(el, 0);
+    expect(node).not.toBeNull();
+    expect(node!.role).toBe('heading');
+    // H2 tag should give level 2, not aria-level 5
+    expect(node!.level).toBe(2);
+  });
 });

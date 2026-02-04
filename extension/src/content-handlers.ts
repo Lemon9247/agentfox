@@ -24,7 +24,7 @@ import type {
 
 /** Elements that should be skipped entirely during tree walks */
 export const SKIP_TAGS = new Set([
-  'SCRIPT', 'STYLE', 'NOSCRIPT', 'TEMPLATE', 'SVG', 'IFRAME',
+  'SCRIPT', 'STYLE', 'NOSCRIPT', 'TEMPLATE', 'SVG',
 ]);
 
 /** Tags that map to implicit ARIA roles */
@@ -480,26 +480,100 @@ function isSemanticRole(role: string): boolean {
 /** Maximum number of nodes to process before truncating the tree */
 export const MAX_NODES = 50000;
 
+/** Maximum estimated JSON size (bytes) for the tree — leaves headroom below the 1MB NM limit */
+export const MAX_TREE_BYTES = 800_000;
+
+/** Default maximum depth for tree traversal (adaptive — reduced under size pressure) */
+export const DEFAULT_MAX_DEPTH = 30;
+
 /** Running node counter, reset per snapshot */
 let nodeCount = 0;
+
+/** Running estimated byte size of the serialized tree, reset per snapshot */
+let estimatedBytes = 0;
+
+/**
+ * Compute the adaptive text truncation limit based on current size budget usage.
+ * As we consume more of the byte budget, we truncate text more aggressively.
+ */
+function getMaxTextLength(): number {
+  if (estimatedBytes > MAX_TREE_BYTES * 0.9) return 50;
+  if (estimatedBytes > MAX_TREE_BYTES * 0.7) return 100;
+  return 200;
+}
+
+/**
+ * Truncate text to the adaptive limit and add an ellipsis indicator.
+ */
+function truncateText(text: string): string {
+  const maxLen = getMaxTextLength();
+  if (text.length > maxLen) return text.slice(0, maxLen) + '...';
+  return text;
+}
+
+/**
+ * Estimate the JSON byte size contribution of a node.
+ * Accounts for role, name, value, and structural overhead (braces, commas, keys).
+ */
+function estimateNodeBytes(name: string, value?: string): number {
+  // Base overhead: {"role":"...","name":"..."} + commas, children key, brackets
+  let estimate = 50;
+  estimate += name.length;
+  if (value) estimate += value.length;
+  return estimate;
+}
+
+/**
+ * Compute the effective max depth based on current size budget usage.
+ * Under size pressure, we reduce traversal depth to limit tree growth.
+ */
+function getEffectiveMaxDepth(): number {
+  if (estimatedBytes > MAX_TREE_BYTES * 0.7) return 15;
+  return DEFAULT_MAX_DEPTH;
+}
 
 /**
  * Build an AccessibilityNode from a DOM element and its subtree.
  * Returns null if the element should be excluded from the tree.
  */
 export function buildNode(el: Element, depth: number): AccessibilityNode | null {
-  // Bail if we've hit the node limit
-  if (nodeCount >= MAX_NODES) return null;
+  // Bail if we've hit the node or size limit
+  if (nodeCount >= MAX_NODES || estimatedBytes >= MAX_TREE_BYTES) return null;
   nodeCount++;
 
-  // Hard depth limit to prevent stack overflow on pathological DOMs
-  if (depth > 100) return null;
+  // Adaptive depth limit: DEFAULT_MAX_DEPTH normally, reduced under size pressure
+  // Hard cap at 100 to prevent stack overflow on pathological DOMs
+  if (depth > 100 || depth > getEffectiveMaxDepth()) return null;
 
   // Skip invisible elements
   if (isHidden(el)) return null;
 
   // Skip non-content tags
   if (SKIP_TAGS.has(el.tagName)) return null;
+
+  // Special handling for iframes: try to access same-origin content
+  if (el.tagName === 'IFRAME') {
+    const node: AccessibilityNode = {
+      role: 'document',
+      name: el.getAttribute('title') || el.getAttribute('aria-label') || '',
+    };
+    try {
+      const iframeDoc = (el as HTMLIFrameElement).contentDocument;
+      if (iframeDoc?.body) {
+        const iframeChildren: AccessibilityNode[] = [];
+        for (const child of iframeDoc.body.children) {
+          const childNode = buildNode(child, depth + 1);
+          if (childNode) iframeChildren.push(childNode);
+        }
+        const flat = flattenGenericChildren(iframeChildren);
+        if (flat.length > 0) node.children = flat;
+      }
+    } catch {
+      // Cross-origin iframe — can't access content
+      node.children = [{ role: 'text', name: '[cross-origin iframe]' }];
+    }
+    return node;
+  }
 
   const role = getRole(el);
   const interactive = isInteractive(el);
@@ -519,10 +593,23 @@ export function buildNode(el: Element, depth: number): AccessibilityNode | null 
     } else if (child.nodeType === Node.TEXT_NODE) {
       const text = (child.textContent || '').trim();
       if (text && text !== name) {
-        childNodes.push({
+        const truncated = truncateText(text);
+        const textNode: AccessibilityNode = {
           role: 'text',
-          name: text.length > 200 ? text.slice(0, 200) + '...' : text,
-        });
+          name: truncated,
+        };
+        estimatedBytes += estimateNodeBytes(truncated);
+        childNodes.push(textNode);
+      }
+    }
+  }
+
+  // Traverse open shadow DOM
+  if (el.shadowRoot) {
+    for (const child of el.shadowRoot.children) {
+      const childNode = buildNode(child as Element, depth + 1);
+      if (childNode) {
+        childNodes.push(childNode);
       }
     }
   }
@@ -535,9 +622,11 @@ export function buildNode(el: Element, depth: number): AccessibilityNode | null 
       const text = getDirectTextContent(el);
       if (!text) return null;
       // Has text content — emit as text node
+      const truncated = truncateText(text);
+      estimatedBytes += estimateNodeBytes(truncated);
       return {
         role: 'text',
-        name: text.length > 200 ? text.slice(0, 200) + '...' : text,
+        name: truncated,
       };
     }
     if (childNodes.length === 1) {
@@ -558,6 +647,10 @@ export function buildNode(el: Element, depth: number): AccessibilityNode | null 
     name,
   };
 
+  // Track estimated size contribution
+  const value = getValue(el);
+  estimatedBytes += estimateNodeBytes(name, value !== undefined ? value : undefined);
+
   // Assign ref for interactive elements
   if (interactive) {
     node.ref = assignRef(el);
@@ -568,11 +661,16 @@ export function buildNode(el: Element, depth: number): AccessibilityNode | null 
     const match = el.tagName.match(/^H(\d)$/);
     if (match) {
       node.level = parseInt(match[1], 10);
+    } else {
+      // Custom heading with aria-level
+      const ariaLevel = el.getAttribute('aria-level');
+      if (ariaLevel) {
+        node.level = parseInt(ariaLevel, 10);
+      }
     }
   }
 
-  // Value
-  const value = getValue(el);
+  // Value (already computed above for size estimation)
   if (value !== undefined) node.value = value;
 
   // State properties
@@ -595,7 +693,7 @@ export function buildNode(el: Element, depth: number): AccessibilityNode | null 
   if (!interactive && !node.children && !name) {
     const text = (el.textContent || '').trim();
     if (!text) return null;
-    node.name = text.length > 200 ? text.slice(0, 200) + '...' : text;
+    node.name = truncateText(text);
   }
 
   return node;
@@ -626,6 +724,7 @@ export function buildAccessibilityTree(): AccessibilityNode {
   // Reset state for fresh build
   resetRefState();
   nodeCount = 0;
+  estimatedBytes = 0;
 
   const root: AccessibilityNode = {
     role: 'document',
@@ -651,6 +750,15 @@ export function buildAccessibilityTree(): AccessibilityNode {
     root.children.push({
       role: 'text',
       name: `[Tree truncated at ${MAX_NODES} nodes]`,
+    });
+  }
+
+  // If we hit the size limit, add a size-based truncation indicator
+  if (estimatedBytes >= MAX_TREE_BYTES) {
+    if (!root.children) root.children = [];
+    root.children.push({
+      role: 'text',
+      name: `[Tree truncated: estimated size ${Math.round(estimatedBytes / 1024)}KB exceeds limit]`,
     });
   }
 
@@ -881,7 +989,6 @@ export function handlePressKey(params: PressKeyParams): void {
   };
 
   target.dispatchEvent(new KeyboardEvent('keydown', opts));
-  target.dispatchEvent(new KeyboardEvent('keypress', opts));
   target.dispatchEvent(new KeyboardEvent('keyup', opts));
 }
 
