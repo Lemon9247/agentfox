@@ -1117,17 +1117,35 @@ export async function handleEvaluate(params: EvaluateParams): Promise<{ value: u
           }
           ${refSelector ? `const el = document.querySelector('${refSelector}');` : ''}
           const result = ${refSelector ? 'await fn(el)' : 'await fn()'};
-          // Serialize safely -- DOM nodes and circular refs become descriptive strings
+          // Serialize safely -- DOM nodes, circular refs, and oversized results
           let value;
           try {
-            JSON.stringify(result);
-            value = result;
+            // Detect DOM nodes early (they cause issues even with String())
+            if (result instanceof Node) {
+              value = '[DOM Node: ' + (result.nodeName || 'unknown') + ']';
+            } else {
+              const serialized = JSON.stringify(result);
+              // Guard against oversized results (> 1MB)
+              if (serialized && serialized.length > 1048576) {
+                value = '[Result truncated: serialized size ' + serialized.length + ' bytes exceeds 1MB limit]';
+              } else {
+                value = result;
+              }
+            }
           } catch {
-            value = String(result);
+            try {
+              value = String(result);
+            } catch {
+              value = '[Unserializable result]';
+            }
           }
           window.dispatchEvent(new CustomEvent('${resultId}', { detail: { value } }));
         } catch (err) {
-          window.dispatchEvent(new CustomEvent('${resultId}', { detail: { error: err.message || String(err) } }));
+          try {
+            window.dispatchEvent(new CustomEvent('${resultId}', { detail: { error: (err && err.message) ? err.message : String(err) } }));
+          } catch (innerErr) {
+            window.dispatchEvent(new CustomEvent('${resultId}', { detail: { error: 'Unknown error (error handler failed)' } }));
+          }
         }
       })();
     `;
