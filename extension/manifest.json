@@ -13,6 +13,7 @@
     "nativeMessaging",
     "tabs",
     "activeTab",
+    "webRequest",
     "<all_urls>"
   ],
   "background": {

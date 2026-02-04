@@ -18,7 +18,8 @@ export type ActionType =
   | 'wait_for'
   | 'tabs'
   | 'close'
-  | 'resize';
+  | 'resize'
+  | 'network_requests';
 
 // ============================================================
 // Tool Parameter Types — typed params for each action
@@ -107,6 +108,11 @@ export interface ResizeParams {
   height: number;
 }
 
+export interface NetworkRequestsParams {
+  action: 'start' | 'stop' | 'get' | 'clear';
+  filter?: string;
+}
+
 /** No params needed */
 export type EmptyParams = Record<string, never>;
 
@@ -134,7 +140,8 @@ export type Command =
   | CommandBase & { action: 'wait_for'; params: WaitForParams }
   | CommandBase & { action: 'tabs'; params: TabsParams }
   | CommandBase & { action: 'close'; params: EmptyParams }
-  | CommandBase & { action: 'resize'; params: ResizeParams };
+  | CommandBase & { action: 'resize'; params: ResizeParams }
+  | CommandBase & { action: 'network_requests'; params: NetworkRequestsParams };
 
 /** Response from extension back to MCP server */
 export interface CommandResponse {
@@ -214,6 +221,20 @@ export interface EvaluateResult {
 
 export interface WaitForResult {
   matched: boolean;
+}
+
+export interface NetworkRequestInfo {
+  url: string;
+  method: string;
+  statusCode: number;
+  type: string;
+  timeStamp: number;
+}
+
+export interface NetworkRequestsResult {
+  requests?: NetworkRequestInfo[];
+  recording?: boolean;
+  count?: number;
 }
 
 // ============================================================
