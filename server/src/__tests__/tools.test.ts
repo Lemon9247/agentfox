@@ -507,6 +507,279 @@ describe('page_content formatResult', () => {
 });
 
 // ============================================================
+// formatResult — Cookies
+// ============================================================
+
+describe('cookies formatResult', () => {
+  const tool = getToolByName('browser_get_cookies')!;
+
+  it('formats cookies with name=value and flags', () => {
+    const result = tool.formatResult({
+      cookies: [
+        {
+          name: 'session',
+          value: 'abc123',
+          domain: '.example.com',
+          path: '/',
+          secure: true,
+          httpOnly: true,
+          sameSite: 'strict',
+          expirationDate: 1700000000,
+        },
+        {
+          name: 'theme',
+          value: 'dark',
+          domain: 'example.com',
+          path: '/',
+          secure: false,
+          httpOnly: false,
+          sameSite: 'lax',
+        },
+      ],
+    });
+    expect(result).toHaveLength(1);
+    const text = (result[0] as any).text;
+    expect(text).toContain('Cookies (2)');
+    expect(text).toContain('session=abc123');
+    expect(text).toContain('domain: .example.com');
+    expect(text).toContain('secure');
+    expect(text).toContain('httpOnly');
+    expect(text).toContain('sameSite: strict');
+    expect(text).toContain('expires:');
+    expect(text).toContain('theme=dark');
+    expect(text).toContain('sameSite: lax');
+  });
+
+  it('handles empty cookies array', () => {
+    const result = tool.formatResult({ cookies: [] });
+    expect((result[0] as any).text).toContain('No cookies found');
+  });
+
+  it('handles null result', () => {
+    const result = tool.formatResult(null);
+    expect((result[0] as any).text).toContain('No cookie data returned');
+  });
+
+  it('handles undefined result', () => {
+    const result = tool.formatResult(undefined);
+    expect((result[0] as any).text).toContain('No cookie data returned');
+  });
+});
+
+// ============================================================
+// formatResult — Bookmarks
+// ============================================================
+
+describe('bookmarks formatResult', () => {
+  const tool = getToolByName('browser_get_bookmarks')!;
+
+  it('formats bookmarks as bulleted list with title and url', () => {
+    const result = tool.formatResult({
+      bookmarks: [
+        { title: 'Example', url: 'https://example.com' },
+        { title: 'Docs', url: 'https://docs.example.com' },
+      ],
+    });
+    expect(result).toHaveLength(1);
+    const text = (result[0] as any).text;
+    expect(text).toContain('Bookmarks (2)');
+    expect(text).toContain('- Example (https://example.com)');
+    expect(text).toContain('- Docs (https://docs.example.com)');
+  });
+
+  it('formats bookmarks without url (folders)', () => {
+    const result = tool.formatResult({
+      bookmarks: [{ title: 'My Folder' }],
+    });
+    const text = (result[0] as any).text;
+    expect(text).toContain('- My Folder');
+    expect(text).not.toContain('(undefined)');
+  });
+
+  it('handles empty bookmarks array', () => {
+    const result = tool.formatResult({ bookmarks: [] });
+    expect((result[0] as any).text).toContain('No bookmarks found');
+  });
+
+  it('handles null result', () => {
+    const result = tool.formatResult(null);
+    expect((result[0] as any).text).toContain('No bookmarks returned');
+  });
+
+  it('handles undefined result', () => {
+    const result = tool.formatResult(undefined);
+    expect((result[0] as any).text).toContain('No bookmarks returned');
+  });
+});
+
+// ============================================================
+// formatResult — History
+// ============================================================
+
+describe('history formatResult', () => {
+  const tool = getToolByName('browser_get_history')!;
+
+  it('formats history items with visit counts and ISO dates', () => {
+    const result = tool.formatResult({
+      items: [
+        {
+          title: 'Example',
+          url: 'https://example.com',
+          visitCount: 5,
+          lastVisitTime: 1700000000000,
+        },
+      ],
+    });
+    expect(result).toHaveLength(1);
+    const text = (result[0] as any).text;
+    expect(text).toContain('History items (1)');
+    expect(text).toContain('Example');
+    expect(text).toContain('https://example.com');
+    expect(text).toContain('Visits: 5');
+    expect(text).toContain('Last visit:');
+    // The date should be ISO format
+    expect(text).toMatch(/\d{4}-\d{2}-\d{2}T/);
+  });
+
+  it('handles items without title', () => {
+    const result = tool.formatResult({
+      items: [
+        { url: 'https://example.com', visitCount: 1 },
+      ],
+    });
+    const text = (result[0] as any).text;
+    expect(text).toContain('(no title)');
+  });
+
+  it('handles items without lastVisitTime', () => {
+    const result = tool.formatResult({
+      items: [
+        { title: 'Page', url: 'https://example.com', visitCount: 2 },
+      ],
+    });
+    const text = (result[0] as any).text;
+    expect(text).toContain('unknown');
+  });
+
+  it('handles empty items array', () => {
+    const result = tool.formatResult({ items: [] });
+    expect((result[0] as any).text).toContain('No history items found');
+  });
+
+  it('handles null result', () => {
+    const result = tool.formatResult(null);
+    expect((result[0] as any).text).toContain('No history results returned');
+  });
+
+  it('handles undefined result', () => {
+    const result = tool.formatResult(undefined);
+    expect((result[0] as any).text).toContain('No history results returned');
+  });
+});
+
+// ============================================================
+// formatResult — Network Requests
+// ============================================================
+
+describe('network formatResult', () => {
+  const tool = getToolByName('browser_network_requests')!;
+
+  it('formats get with requests as table', () => {
+    const result = tool.formatResult({
+      requests: [
+        { method: 'GET', statusCode: 200, type: 'main_frame', url: 'https://example.com' },
+        { method: 'POST', statusCode: 201, type: 'xmlhttprequest', url: 'https://api.example.com/data' },
+      ],
+      recording: true,
+    });
+    expect(result).toHaveLength(1);
+    const text = (result[0] as any).text;
+    expect(text).toContain('Requests (2)');
+    expect(text).toContain('Method | Status | Type | URL');
+    expect(text).toContain('GET | 200 | main_frame | https://example.com');
+    expect(text).toContain('POST | 201 | xmlhttprequest | https://api.example.com/data');
+    expect(text).toContain('Recording: active');
+  });
+
+  it('formats get with empty requests', () => {
+    const result = tool.formatResult({
+      requests: [],
+      recording: false,
+    });
+    const text = (result[0] as any).text;
+    expect(text).toContain('No requests recorded');
+    expect(text).toContain('Recording: stopped');
+  });
+
+  it('formats start response', () => {
+    const result = tool.formatResult({
+      recording: true,
+      count: 0,
+    });
+    const text = (result[0] as any).text;
+    expect(text).toContain('Recording: active');
+    expect(text).toContain('Buffered requests: 0');
+  });
+
+  it('formats stop response', () => {
+    const result = tool.formatResult({
+      recording: false,
+      count: 5,
+    });
+    const text = (result[0] as any).text;
+    expect(text).toContain('Recording: stopped');
+    expect(text).toContain('Buffered requests: 5');
+  });
+
+  it('handles null result', () => {
+    const result = tool.formatResult(null);
+    const text = (result[0] as any).text;
+    expect(text).toContain('no details');
+  });
+
+  it('handles undefined result', () => {
+    const result = tool.formatResult(undefined);
+    const text = (result[0] as any).text;
+    expect(text).toContain('no details');
+  });
+});
+
+// ============================================================
+// formatResult — PDF
+// ============================================================
+
+describe('pdf formatResult', () => {
+  const tool = getToolByName('browser_save_pdf')!;
+
+  it('formats saved status', () => {
+    const result = tool.formatResult({ saved: true, status: 'complete' });
+    expect(result).toHaveLength(1);
+    const text = (result[0] as any).text;
+    expect(text).toContain('PDF saved successfully');
+    expect(text).toContain('complete');
+  });
+
+  it('formats not-saved status', () => {
+    const result = tool.formatResult({ saved: false, status: 'cancelled' });
+    const text = (result[0] as any).text;
+    expect(text).toContain('PDF not saved');
+    expect(text).toContain('cancelled');
+  });
+
+  it('handles null result', () => {
+    const result = tool.formatResult(null);
+    const text = (result[0] as any).text;
+    expect(text).toContain('no details');
+  });
+
+  it('handles undefined result', () => {
+    const result = tool.formatResult(undefined);
+    const text = (result[0] as any).text;
+    expect(text).toContain('no details');
+  });
+});
+
+// ============================================================
 // Action mapping
 // ============================================================
 

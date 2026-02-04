@@ -13,6 +13,7 @@ import {
   handleSelectOption,
   handleEvaluate,
   handleWaitFor,
+  handlePageContent,
   buildAccessibilityTree,
   resetRefState,
   refMap,
@@ -689,5 +690,38 @@ describe('processRequest', () => {
     const resp = await processRequest('r4', 'click', { ref: 'e999' });
     expect(resp.success).toBe(false);
     expect(resp.error).toContain('not found');
+  });
+});
+
+// ============================================================
+// handlePageContent
+// ============================================================
+
+describe('handlePageContent', () => {
+  it('extracts text from document body', () => {
+    document.body.innerHTML = '<div><p>Hello world</p><p>Second paragraph</p></div>';
+    const result = handlePageContent({});
+    expect(result.text).toContain('Hello world');
+    expect(result.text).toContain('Second paragraph');
+    expect(result.url).toBeDefined();
+    expect(result.title).toBeDefined();
+  });
+
+  it('extracts text from a specific selector', () => {
+    document.body.innerHTML = '<div id="target">Target text</div><div>Other text</div>';
+    const result = handlePageContent({ selector: '#target' });
+    expect(result.text).toBe('Target text');
+    expect(result.text).not.toContain('Other text');
+  });
+
+  it('throws for invalid selector', () => {
+    document.body.innerHTML = '<div>Content</div>';
+    expect(() => handlePageContent({ selector: '#nonexistent' })).toThrow('No element found');
+  });
+
+  it('normalizes whitespace', () => {
+    document.body.innerHTML = '<div>  Multiple   spaces   here  </div>';
+    const result = handlePageContent({});
+    expect(result.text).not.toContain('  '); // no double spaces
   });
 });
