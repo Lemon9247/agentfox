@@ -80,6 +80,19 @@ declare namespace browser {
     function setBadgeBackgroundColor(details: { color: string }): Promise<void>;
     function setTitle(details: { title: string }): Promise<void>;
   }
+
+  namespace bookmarks {
+    interface BookmarkTreeNode {
+      id: string;
+      title: string;
+      url?: string;
+      dateAdded?: number;
+      children?: BookmarkTreeNode[];
+      type?: string;
+    }
+    function search(query: string | { query?: string }): Promise<BookmarkTreeNode[]>;
+    function getRecent(numberOfItems: number): Promise<BookmarkTreeNode[]>;
+  }
 }
 
 // ============================================================
@@ -422,6 +435,30 @@ async function handleResize(
   return {};
 }
 
+async function handleGetBookmarks(
+  command: Command & { action: 'get_bookmarks' },
+): Promise<{ bookmarks: Array<{ id: string; title: string; url?: string; dateAdded?: number }> }> {
+  const { params } = command;
+  let bookmarks: browser.bookmarks.BookmarkTreeNode[];
+
+  if (params.query) {
+    bookmarks = await browser.bookmarks.search(params.query);
+  } else {
+    bookmarks = await browser.bookmarks.getRecent(50);
+  }
+
+  return {
+    bookmarks: bookmarks
+      .filter((b) => b.url) // Only include actual bookmarks, not folders
+      .map((b) => ({
+        id: b.id,
+        title: b.title,
+        url: b.url,
+        dateAdded: b.dateAdded,
+      })),
+  };
+}
+
 // ============================================================
 // Command dispatcher
 // ============================================================
@@ -472,6 +509,10 @@ async function handleCommand(
 
       case 'resize':
         result = await handleResize(command);
+        break;
+
+      case 'get_bookmarks':
+        result = await handleGetBookmarks(command);
         break;
 
       default:

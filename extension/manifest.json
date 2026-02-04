@@ -13,6 +13,7 @@
     "nativeMessaging",
     "tabs",
     "activeTab",
+    "bookmarks",
     "<all_urls>"
   ],
   "background": {
