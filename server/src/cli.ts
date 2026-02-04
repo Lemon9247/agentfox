@@ -1,12 +1,19 @@
-import { mkdirSync, writeFileSync, realpathSync } from 'node:fs';
+import { existsSync, mkdirSync, writeFileSync, realpathSync } from 'node:fs';
 import { homedir, platform } from 'node:os';
 import { dirname, resolve, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const EXTENSION_ID = 'agentfox@willow.sh';
+
+// NM_HOST_NAME must match the manifest filename (per Mozilla native messaging spec)
 const NM_HOST_NAME = 'agentfox';
 
-const USAGE = `Agent Fox — AI browser agent for Firefox
+const VERSION = '0.1.0';
+
+// Resolved once at module scope and reused by all path-resolution helpers.
+const DIST_DIR = dirname(fileURLToPath(import.meta.url));
+
+const USAGE = `Agent Fox v${VERSION} — AI browser agent for Firefox
 
 Usage: agentfox <command>
 
@@ -14,7 +21,8 @@ Commands:
   setup    Install native messaging host and show MCP config
 
 Options:
-  --help   Show this help message
+  -h, --help      Show this help message
+  -v, --version   Show version number
 `;
 
 /**
@@ -23,14 +31,20 @@ Options:
  * Bin scripts live at server/bin/<name>.
  */
 function resolveBinPath(name: string): string {
-  const distDir = dirname(fileURLToPath(import.meta.url));
-  const binPath = resolve(distDir, '..', 'bin', name);
+  const binPath = resolve(DIST_DIR, '..', 'bin', name);
   // Resolve symlinks to get the canonical absolute path
-  return realpathSync(binPath);
+  try {
+    return realpathSync(binPath);
+  } catch {
+    throw new Error(
+      `Could not find bin script at ${binPath}\nMake sure the project is built correctly.`,
+    );
+  }
 }
 
 /**
  * Get the platform-specific directory for native messaging host manifests.
+ * Throws on unsupported platforms — callers handle the error.
  */
 function getNativeMessagingHostDir(): string {
   const home = homedir();
@@ -43,8 +57,7 @@ function getNativeMessagingHostDir(): string {
     return join(home, 'Library', 'Application Support', 'Mozilla', 'NativeMessagingHosts');
   }
 
-  console.log(`Error: Unsupported platform "${plat}". Only Linux and macOS are supported.`);
-  process.exit(1);
+  throw new Error(`Unsupported platform "${plat}". Only Linux and macOS are supported.`);
 }
 
 /**
@@ -58,48 +71,64 @@ function generateManifest(nmHostPath: string): string {
     type: 'stdio',
     allowed_extensions: [EXTENSION_ID],
   };
-  return JSON.stringify(manifest, null, 2);
+  return JSON.stringify(manifest, null, 2) + '\n';
 }
 
 /**
  * The `setup` subcommand: installs the NM host manifest and prints MCP config.
  */
 function setup(): void {
-  // Resolve bin paths
-  const nmHostPath = resolveBinPath('agentfox-nm-host');
-  const mcpPath = resolveBinPath('agentfox-mcp');
+  try {
+    // Resolve bin paths
+    const nmHostPath = resolveBinPath('agentfox-nm-host');
+    const mcpPath = resolveBinPath('agentfox-mcp');
 
-  // Determine manifest location
-  const nmHostDir = getNativeMessagingHostDir();
-  const manifestPath = join(nmHostDir, `${NM_HOST_NAME}.json`);
+    // Determine manifest location
+    const nmHostDir = getNativeMessagingHostDir();
+    const manifestPath = join(nmHostDir, `${NM_HOST_NAME}.json`);
 
-  // Write the native messaging host manifest
-  mkdirSync(nmHostDir, { recursive: true });
-  writeFileSync(manifestPath, generateManifest(nmHostPath) + '\n');
+    // Write the native messaging host manifest
+    try {
+      mkdirSync(nmHostDir, { recursive: true });
+      writeFileSync(manifestPath, generateManifest(nmHostPath));
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      throw new Error(`Failed to write manifest to ${manifestPath}\n${message}`);
+    }
 
-  console.log(`Native messaging host manifest installed at: ${manifestPath}`);
-  console.log();
+    console.log(`Native messaging host manifest installed at: ${manifestPath}`);
+    console.log();
 
-  // Print Claude Code MCP config
-  console.log('Add the following to your Claude Code MCP settings:');
-  console.log();
-  console.log(JSON.stringify({
-    mcpServers: {
-      agentfox: {
-        command: 'node',
-        args: [mcpPath],
+    // Print Claude Code MCP config
+    console.log(
+      'Add the following to your Claude Code settings (Settings > MCP Servers) or ~/.claude.json:',
+    );
+    console.log();
+    console.log(JSON.stringify({
+      mcpServers: {
+        agentfox: {
+          command: mcpPath,
+        },
       },
-    },
-  }, null, 2));
-  console.log();
+    }, null, 2));
+    console.log();
 
-  // Print extension installation instructions
-  const distDir = dirname(fileURLToPath(import.meta.url));
-  const extensionDistDir = resolve(distDir, '..', '..', 'extension', 'dist');
-  console.log('To install the extension:');
-  console.log(`  1. Open Firefox and navigate to about:debugging#/runtime/this-firefox`);
-  console.log(`  2. Click "Load Temporary Add-on..."`);
-  console.log(`  3. Select any file in: ${extensionDistDir}`);
+    // Print extension installation instructions
+    const extensionDistDir = resolve(DIST_DIR, '..', '..', 'extension', 'dist');
+    console.log('To install the extension:');
+    if (!existsSync(extensionDistDir)) {
+      console.warn(`  Warning: Extension dist not found at ${extensionDistDir}`);
+      console.warn('  You may need to build the extension first: pnpm build');
+    } else {
+      console.log(`  1. Open Firefox and navigate to about:debugging#/runtime/this-firefox`);
+      console.log(`  2. Click "Load Temporary Add-on..."`);
+      console.log(`  3. Select any file in: ${extensionDistDir}`);
+    }
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.error(`Error: ${message}`);
+    process.exit(1);
+  }
 }
 
 /**
@@ -114,14 +143,19 @@ function main(): void {
     return;
   }
 
+  if (command === '--version' || command === '-v') {
+    console.log(VERSION);
+    return;
+  }
+
   if (command === 'setup') {
     setup();
     return;
   }
 
-  console.log(`Unknown command: ${command}`);
-  console.log();
-  console.log(USAGE);
+  console.error(`Unknown command: ${command}`);
+  console.error();
+  console.error(USAGE);
   process.exit(1);
 }
 
