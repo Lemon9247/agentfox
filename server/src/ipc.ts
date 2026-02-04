@@ -95,6 +95,16 @@ export class IpcServer extends EventEmitter<IpcServerEvents> {
   private decoder = new FrameDecoder();
   private readonly pending = new Map<string, PendingCommand>();
 
+  /** Tracks whether any client has ever successfully connected. */
+  private _hasEverConnected = false;
+
+  /** Heartbeat interval timer. */
+  private heartbeatInterval: ReturnType<typeof setInterval> | null = null;
+  /** Timer for awaiting a pong response. */
+  private pongTimeout: ReturnType<typeof setTimeout> | null = null;
+  /** Whether we are waiting for a pong from the client. */
+  private awaitingPong = false;
+
   constructor(config: ServerConfig) {
     super();
     this.socketPath = config.socketPath;
@@ -104,6 +114,36 @@ export class IpcServer extends EventEmitter<IpcServerEvents> {
   /** Whether a client (the NM host) is currently connected. */
   get connected(): boolean {
     return this.client !== null;
+  }
+
+  /** Whether any client has ever connected since this server started. */
+  get hasEverConnected(): boolean {
+    return this._hasEverConnected;
+  }
+
+  /**
+   * Wait for a client to connect, with a timeout.
+   * Resolves immediately if a client is already connected.
+   * Rejects if no client connects within the specified timeout.
+   */
+  waitForConnection(timeoutMs: number): Promise<void> {
+    if (this.client) {
+      return Promise.resolve();
+    }
+
+    return new Promise<void>((resolve, reject) => {
+      const onConnected = (): void => {
+        clearTimeout(timer);
+        resolve();
+      };
+
+      const timer = setTimeout(() => {
+        this.removeListener('client-connected', onConnected);
+        reject(new Error(`No client connected within ${timeoutMs}ms`));
+      }, timeoutMs);
+
+      this.once('client-connected', onConnected);
+    });
   }
 
   /** Start listening on the Unix domain socket. */
@@ -178,6 +218,9 @@ export class IpcServer extends EventEmitter<IpcServerEvents> {
 
   /** Shut down the server and clean up all resources. */
   close(): void {
+    // Stop heartbeat
+    this.stopHeartbeat();
+
     // Reject all pending commands
     for (const pending of this.pending.values()) {
       clearTimeout(pending.timeout);
@@ -207,6 +250,48 @@ export class IpcServer extends EventEmitter<IpcServerEvents> {
     this.decoder.reset();
   }
 
+  // ---- Heartbeat ----
+
+  private static readonly HEARTBEAT_INTERVAL_MS = 15_000;
+  private static readonly PONG_TIMEOUT_MS = 5_000;
+
+  /** Start the heartbeat interval. Sends a ping every 15 seconds. */
+  private startHeartbeat(): void {
+    this.stopHeartbeat();
+
+    this.heartbeatInterval = setInterval(() => {
+      if (!this.client || this.awaitingPong) {
+        return;
+      }
+
+      this.awaitingPong = true;
+      const ping: IpcMessage = { type: 'ping', payload: null };
+      this.client.write(encodeFrame(ping));
+
+      this.pongTimeout = setTimeout(() => {
+        // No pong received in time — consider client dead
+        this.awaitingPong = false;
+        if (this.client) {
+          this.emit('error', new Error('Heartbeat timeout: no pong received'));
+          this.client.destroy();
+        }
+      }, IpcServer.PONG_TIMEOUT_MS);
+    }, IpcServer.HEARTBEAT_INTERVAL_MS);
+  }
+
+  /** Stop the heartbeat interval and clear pending pong timer. */
+  private stopHeartbeat(): void {
+    if (this.heartbeatInterval) {
+      clearInterval(this.heartbeatInterval);
+      this.heartbeatInterval = null;
+    }
+    if (this.pongTimeout) {
+      clearTimeout(this.pongTimeout);
+      this.pongTimeout = null;
+    }
+    this.awaitingPong = false;
+  }
+
   private handleConnection(socket: net.Socket): void {
     // Only allow one client at a time
     if (this.client) {
@@ -215,7 +300,9 @@ export class IpcServer extends EventEmitter<IpcServerEvents> {
     }
 
     this.client = socket;
+    this._hasEverConnected = true;
     this.decoder.reset();
+    this.startHeartbeat();
     this.emit('client-connected');
 
     socket.on('data', (data: Buffer) => {
@@ -234,6 +321,7 @@ export class IpcServer extends EventEmitter<IpcServerEvents> {
     });
 
     socket.on('close', () => {
+      this.stopHeartbeat();
       this.client = null;
       this.decoder.reset();
 
@@ -267,6 +355,16 @@ export class IpcServer extends EventEmitter<IpcServerEvents> {
       case 'ping': {
         const pong: IpcMessage = { type: 'pong', payload: null };
         socket.write(encodeFrame(pong));
+        break;
+      }
+
+      case 'pong': {
+        // Heartbeat response received — client is alive
+        this.awaitingPong = false;
+        if (this.pongTimeout) {
+          clearTimeout(this.pongTimeout);
+          this.pongTimeout = null;
+        }
         break;
       }
 
