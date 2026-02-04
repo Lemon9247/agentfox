@@ -22,7 +22,8 @@ export type ActionType =
   | 'get_cookies'
   | 'get_bookmarks'
   | 'get_history'
-  | 'network_requests';
+  | 'network_requests'
+  | 'save_pdf';
 
 // ============================================================
 // Tool Parameter Types — typed params for each action
@@ -131,6 +132,13 @@ export interface NetworkRequestsParams {
   filter?: string;
 }
 
+export interface SavePdfParams {
+  headerLeft?: string;
+  headerRight?: string;
+  footerLeft?: string;
+  footerRight?: string;
+}
+
 /** No params needed */
 export type EmptyParams = Record<string, never>;
 
@@ -162,7 +170,8 @@ export type Command =
   | CommandBase & { action: 'get_cookies'; params: GetCookiesParams }
   | CommandBase & { action: 'get_bookmarks'; params: GetBookmarksParams }
   | CommandBase & { action: 'get_history'; params: GetHistoryParams }
-  | CommandBase & { action: 'network_requests'; params: NetworkRequestsParams };
+  | CommandBase & { action: 'network_requests'; params: NetworkRequestsParams }
+  | CommandBase & { action: 'save_pdf'; params: SavePdfParams };
 
 /** Response from extension back to MCP server */
 export interface CommandResponse {
@@ -293,6 +302,11 @@ export interface NetworkRequestsResult {
   requests?: NetworkRequestInfo[];
   recording?: boolean;
   count?: number;
+}
+
+export interface SavePdfResult {
+  saved: boolean;
+  status: string;
 }
 
 // ============================================================
