@@ -11,13 +11,18 @@
     "build": "tsx scripts/build.ts",
     "dev": "tsx scripts/build.ts --watch",
     "clean": "rm -rf shared/dist server/dist extension/dist **/tsconfig.tsbuildinfo",
-    "lint": "tsc --noEmit --project shared/tsconfig.json && tsc --noEmit --project server/tsconfig.json && tsc --noEmit --project extension/tsconfig.json"
+    "lint": "tsc --noEmit --project shared/tsconfig.json && tsc --noEmit --project server/tsconfig.json && tsc --noEmit --project extension/tsconfig.json",
+    "test": "vitest run",
+    "test:watch": "vitest"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",
+    "@vitest/coverage-v8": "^4.0.18",
     "esbuild": "^0.24.0",
+    "jsdom": "^28.0.0",
     "tsx": "^4.0.0",
     "typescript": "^5.7.0",
+    "vitest": "^4.0.18",
     "web-ext": "^8.0.0"
   }
 }
