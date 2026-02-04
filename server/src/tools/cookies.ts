@@ -11,6 +11,10 @@ const cookiesTool: ToolDefinition = {
         type: 'string',
         description: 'URL to get cookies for. If omitted, uses the current page URL.',
       },
+      domain: {
+        type: 'string',
+        description: 'Filter cookies by domain (alternative to url)',
+      },
     },
   },
   action: 'get_cookies',

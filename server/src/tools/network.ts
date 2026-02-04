@@ -4,7 +4,7 @@ import type { ToolDefinition } from './index.js';
 const networkTool: ToolDefinition = {
   name: 'browser_network_requests',
   description:
-    "Monitor network requests. Use 'start' to begin recording, 'stop' to stop, 'get' to retrieve recorded requests, 'clear' to clear the buffer.",
+    "Monitor network requests. Use 'start' to begin recording, 'stop' to stop, 'get' to retrieve recorded requests, 'clear' to clear the buffer. Calling 'start' while already recording returns the current state without resetting.",
   inputSchema: {
     type: 'object',
     properties: {
@@ -16,7 +16,7 @@ const networkTool: ToolDefinition = {
       },
       filter: {
         type: 'string',
-        description: 'URL pattern to filter requests (substring match)',
+        description: 'URL pattern to filter requests (substring match). Only used with the "get" action.',
       },
     },
     required: ['action'],

@@ -115,10 +115,12 @@ export interface ResizeParams {
 
 export interface GetCookiesParams {
   url?: string;
+  domain?: string;
 }
 
 export interface GetBookmarksParams {
   query?: string;
+  maxResults?: number;
 }
 
 export interface GetHistoryParams {
@@ -302,6 +304,8 @@ export interface NetworkRequestInfo {
   statusCode: number;
   type: string;
   timeStamp: number;
+  tabId?: number;
+  error?: string;
 }
 
 export interface NetworkRequestsResult {

@@ -1361,10 +1361,12 @@ export function handlePageContent(params: PageContentParams): { text: string; ur
 
   // Extract text content, cleaning up whitespace
   const rawText = root?.textContent || '';
-  // Normalize whitespace: collapse multiple spaces/newlines, trim
+  // Normalize whitespace: collapse horizontal whitespace, trim around newlines,
+  // cap consecutive newlines
   const text = rawText
-    .replace(/\s+/g, ' ')
-    .replace(/ ?\n ?/g, '\n')
+    .replace(/[ \t]+/g, ' ')            // collapse horizontal whitespace only
+    .replace(/ ?\n ?/g, '\n')           // trim spaces around newlines
+    .replace(/\n{3,}/g, '\n\n')         // cap consecutive newlines at 2
     .trim();
 
   return {

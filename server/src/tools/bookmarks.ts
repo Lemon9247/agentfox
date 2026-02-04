@@ -12,6 +12,11 @@ const bookmarksTool: ToolDefinition = {
         description:
           'Search query to filter bookmarks. If not provided, lists recent bookmarks.',
       },
+      maxResults: {
+        type: 'number',
+        description:
+          'Maximum number of bookmarks to return. Defaults to 50.',
+      },
     },
   },
   action: 'get_bookmarks',

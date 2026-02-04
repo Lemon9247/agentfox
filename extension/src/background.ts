@@ -9,6 +9,11 @@ import type {
   ContentResponse,
   ActionType,
   TabInfo,
+  GetCookiesResult,
+  GetBookmarksResult,
+  GetHistoryResult,
+  NetworkRequestsResult,
+  SavePdfResult,
 } from '@agentfox/shared';
 
 // ============================================================
@@ -110,8 +115,8 @@ declare namespace browser {
 
   namespace history {
     interface HistoryItem {
-      url: string;
-      title: string;
+      url?: string;
+      title?: string;
       visitCount: number;
       lastVisitTime: number;
     }
@@ -131,6 +136,7 @@ declare namespace browser {
 const NM_APP_NAME = 'agentfox';
 const MAX_RECONNECT_RETRIES = 5;
 const BASE_RECONNECT_DELAY_MS = 1000;
+const DEFAULT_MAX_RESULTS = 50;
 
 /** Actions that require forwarding to the content script */
 const CONTENT_SCRIPT_ACTIONS: ReadonlySet<ActionType> = new Set([
@@ -160,6 +166,8 @@ let networkRequests: Array<{
   statusCode: number;
   type: string;
   timeStamp: number;
+  tabId?: number;
+  error?: string;
 }> = [];
 
 /** Whether we're currently recording network requests */
@@ -168,6 +176,11 @@ let networkRecording = false;
 /** The webRequest listener function (stored so we can remove it) */
 let networkListener:
   | ((details: browser.webRequest.RequestDetails) => void)
+  | null = null;
+
+/** The webRequest error listener function (stored so we can remove it) */
+let networkErrorListener:
+  | ((details: browser.webRequest.ErrorDetails) => void)
   | null = null;
 
 /** Maximum number of requests to buffer */
@@ -487,8 +500,25 @@ async function handleResize(
 
 async function handleGetCookies(
   command: Command & { action: 'get_cookies' },
-): Promise<{ cookies: Array<{ name: string; value: string; domain: string; path: string; secure: boolean; httpOnly: boolean; sameSite: string; expirationDate?: number }> }> {
+): Promise<GetCookiesResult> {
   const { params } = command;
+  if (params.domain) {
+    const cookies = await browser.cookies.getAll({ domain: params.domain });
+
+    return {
+      cookies: cookies.map((c) => ({
+        name: c.name,
+        value: c.value,
+        domain: c.domain,
+        path: c.path,
+        secure: c.secure,
+        httpOnly: c.httpOnly,
+        sameSite: c.sameSite,
+        expirationDate: c.expirationDate,
+      })),
+    };
+  }
+
   let url = params.url;
 
   if (!url) {
@@ -518,14 +548,22 @@ async function handleGetCookies(
 
 async function handleGetHistory(
   command: Command & { action: 'get_history' },
-): Promise<{ items: Array<{ url: string; title: string; visitCount: number; lastVisitTime: number }> }> {
+): Promise<GetHistoryResult> {
   const { params } = command;
   const searchParams: { text: string; startTime?: number; endTime?: number; maxResults?: number } = {
     text: params.query || '',
-    maxResults: params.maxResults || 50,
+    maxResults: params.maxResults || DEFAULT_MAX_RESULTS,
   };
-  if (params.startTime) searchParams.startTime = new Date(params.startTime).getTime();
-  if (params.endTime) searchParams.endTime = new Date(params.endTime).getTime();
+  if (params.startTime) {
+    const t = new Date(params.startTime).getTime();
+    if (isNaN(t)) throw new Error(`Invalid startTime: "${params.startTime}"`);
+    searchParams.startTime = t;
+  }
+  if (params.endTime) {
+    const t = new Date(params.endTime).getTime();
+    if (isNaN(t)) throw new Error(`Invalid endTime: "${params.endTime}"`);
+    searchParams.endTime = t;
+  }
 
   const items = await browser.history.search(searchParams);
   return {
@@ -540,14 +578,14 @@ async function handleGetHistory(
 
 async function handleGetBookmarks(
   command: Command & { action: 'get_bookmarks' },
-): Promise<{ bookmarks: Array<{ id: string; title: string; url?: string; dateAdded?: number }> }> {
+): Promise<GetBookmarksResult> {
   const { params } = command;
   let bookmarks: browser.bookmarks.BookmarkTreeNode[];
 
   if (params.query) {
     bookmarks = await browser.bookmarks.search(params.query);
   } else {
-    bookmarks = await browser.bookmarks.getRecent(50);
+    bookmarks = await browser.bookmarks.getRecent(params.maxResults || DEFAULT_MAX_RESULTS);
   }
 
   return {
@@ -562,20 +600,13 @@ async function handleGetBookmarks(
   };
 }
 
-
 // ============================================================
 // Network request recording
 // ============================================================
 
-async function handleNetworkRequests(
+function handleNetworkRequests(
   command: Command & { action: 'network_requests' },
-): Promise<{ requests?: Array<{
-  url: string;
-  method: string;
-  statusCode: number;
-  type: string;
-  timeStamp: number;
-}>; recording?: boolean; count?: number }> {
+): NetworkRequestsResult {
   const { params } = command;
 
   switch (params.action) {
@@ -592,9 +623,25 @@ async function handleNetworkRequests(
           statusCode: details.statusCode || 0,
           type: details.type,
           timeStamp: details.timeStamp,
+          tabId: details.tabId,
         });
       };
       browser.webRequest.onCompleted.addListener(networkListener, {
+        urls: ['<all_urls>'],
+      });
+      networkErrorListener = (details) => {
+        if (networkRequests.length >= MAX_NETWORK_REQUESTS) return;
+        networkRequests.push({
+          url: details.url,
+          method: details.method,
+          statusCode: 0,
+          type: details.type,
+          timeStamp: details.timeStamp,
+          tabId: details.tabId,
+          error: details.error,
+        });
+      };
+      browser.webRequest.onErrorOccurred.addListener(networkErrorListener, {
         urls: ['<all_urls>'],
       });
       networkRecording = true;
@@ -605,6 +652,10 @@ async function handleNetworkRequests(
       if (networkListener) {
         browser.webRequest.onCompleted.removeListener(networkListener);
         networkListener = null;
+      }
+      if (networkErrorListener) {
+        browser.webRequest.onErrorOccurred.removeListener(networkErrorListener);
+        networkErrorListener = null;
       }
       networkRecording = false;
       return { recording: false, count: networkRequests.length };
@@ -633,7 +684,7 @@ async function handleNetworkRequests(
 
 async function handleSavePdf(
   command: Command & { action: 'save_pdf' },
-): Promise<{ saved: boolean; status: string }> {
+): Promise<SavePdfResult> {
   const { params } = command;
   const pageSettings: {
     headerLeft?: string;
@@ -641,10 +692,10 @@ async function handleSavePdf(
     footerLeft?: string;
     footerRight?: string;
   } = {};
-  if (params.headerLeft) pageSettings.headerLeft = params.headerLeft;
-  if (params.headerRight) pageSettings.headerRight = params.headerRight;
-  if (params.footerLeft) pageSettings.footerLeft = params.footerLeft;
-  if (params.footerRight) pageSettings.footerRight = params.footerRight;
+  if (params.headerLeft !== undefined) pageSettings.headerLeft = params.headerLeft;
+  if (params.headerRight !== undefined) pageSettings.headerRight = params.headerRight;
+  if (params.footerLeft !== undefined) pageSettings.footerLeft = params.footerLeft;
+  if (params.footerRight !== undefined) pageSettings.footerRight = params.footerRight;
 
   const status = await browser.tabs.saveAsPDF(pageSettings);
   return {
@@ -878,6 +929,16 @@ declare namespace browser.webRequest {
     tabId: number;
   }
 
+  interface ErrorDetails {
+    requestId: string;
+    url: string;
+    method: string;
+    type: string;
+    timeStamp: number;
+    tabId: number;
+    error: string;
+  }
+
   const onCompleted: {
     addListener(
       callback: (details: RequestDetails) => void,
@@ -885,6 +946,15 @@ declare namespace browser.webRequest {
     ): void;
     removeListener(callback: (details: RequestDetails) => void): void;
     hasListener(callback: (details: RequestDetails) => void): boolean;
+  };
+
+  const onErrorOccurred: {
+    addListener(
+      callback: (details: ErrorDetails) => void,
+      filter?: { urls: string[] },
+    ): void;
+    removeListener(callback: (details: ErrorDetails) => void): void;
+    hasListener(callback: (details: ErrorDetails) => void): boolean;
   };
 }
 
