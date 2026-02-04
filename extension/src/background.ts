@@ -80,6 +80,21 @@ declare namespace browser {
     function setBadgeBackgroundColor(details: { color: string }): Promise<void>;
     function setTitle(details: { title: string }): Promise<void>;
   }
+
+  namespace history {
+    interface HistoryItem {
+      url: string;
+      title: string;
+      visitCount: number;
+      lastVisitTime: number;
+    }
+    function search(query: {
+      text: string;
+      startTime?: number;
+      endTime?: number;
+      maxResults?: number;
+    }): Promise<HistoryItem[]>;
+  }
 }
 
 // ============================================================
@@ -422,6 +437,28 @@ async function handleResize(
   return {};
 }
 
+async function handleGetHistory(
+  command: Command & { action: 'get_history' },
+): Promise<{ items: Array<{ url: string; title: string; visitCount: number; lastVisitTime: number }> }> {
+  const { params } = command;
+  const searchParams: { text: string; startTime?: number; endTime?: number; maxResults?: number } = {
+    text: params.query || '',
+    maxResults: params.maxResults || 50,
+  };
+  if (params.startTime) searchParams.startTime = new Date(params.startTime).getTime();
+  if (params.endTime) searchParams.endTime = new Date(params.endTime).getTime();
+
+  const items = await browser.history.search(searchParams);
+  return {
+    items: items.map(item => ({
+      url: item.url || '',
+      title: item.title || '',
+      visitCount: item.visitCount || 0,
+      lastVisitTime: item.lastVisitTime || 0,
+    })),
+  };
+}
+
 // ============================================================
 // Command dispatcher
 // ============================================================
@@ -472,6 +509,10 @@ async function handleCommand(
 
       case 'resize':
         result = await handleResize(command);
+        break;
+
+      case 'get_history':
+        result = await handleGetHistory(command);
         break;
 
       default:
