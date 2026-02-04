@@ -42,7 +42,16 @@ export const tools: ToolDefinition[] = [
   screenshotTool,
 ];
 
+/** Map for O(1) tool lookups by name. Built at module load time. */
+const toolMap = new Map<string, ToolDefinition>();
+for (const tool of tools) {
+  if (toolMap.has(tool.name)) {
+    throw new Error(`Duplicate tool name: ${tool.name}`);
+  }
+  toolMap.set(tool.name, tool);
+}
+
 /** Look up a tool by its MCP name. Returns undefined if not found. */
 export function getToolByName(name: string): ToolDefinition | undefined {
-  return tools.find((t) => t.name === name);
+  return toolMap.get(name);
 }

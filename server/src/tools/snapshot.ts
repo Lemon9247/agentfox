@@ -1,4 +1,4 @@
-import type { ActionType, AccessibilityNode, SnapshotResult } from '@agentfox/shared';
+import type { AccessibilityNode, SnapshotResult } from '@agentfox/shared';
 import type { ToolDefinition } from './index.js';
 
 /**
@@ -30,6 +30,7 @@ function renderTree(node: AccessibilityNode, depth = 0): string {
   if (node.selected !== undefined) attrs.push(`selected=${node.selected}`);
   if (node.required !== undefined) attrs.push(`required=${node.required}`);
   if (node.value !== undefined) attrs.push(`value="${node.value}"`);
+  if (node.description) attrs.push(`description="${node.description}"`);
 
   if (attrs.length > 0) {
     line += ` [${attrs.join(', ')}]`;
@@ -54,15 +55,31 @@ const snapshotTool: ToolDefinition = {
     type: 'object',
     properties: {},
   },
-  action: 'snapshot' as ActionType,
+  action: 'snapshot',
 
   formatResult(result: unknown) {
+    if (!result || typeof result !== 'object') {
+      return [
+        {
+          type: 'text' as const,
+          text: 'Snapshot failed (no data returned)',
+        },
+      ];
+    }
     const r = result as SnapshotResult;
+    if (!r.tree) {
+      return [
+        {
+          type: 'text' as const,
+          text: `Page: ${r.title ?? 'unknown'}\nURL: ${r.url ?? 'unknown'}\n\n(empty accessibility tree)`,
+        },
+      ];
+    }
     const treeText = renderTree(r.tree);
     return [
       {
         type: 'text' as const,
-        text: `Page: ${r.title}\nURL: ${r.url}\n\n${treeText}`,
+        text: `Page: ${r.title ?? 'unknown'}\nURL: ${r.url ?? 'unknown'}\n\n${treeText}`,
       },
     ];
   },

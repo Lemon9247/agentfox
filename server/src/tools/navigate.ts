@@ -1,4 +1,4 @@
-import type { ActionType, NavigateResult } from '@agentfox/shared';
+import type { NavigateResult } from '@agentfox/shared';
 import type { ToolDefinition } from './index.js';
 
 const navigateTool: ToolDefinition = {
@@ -14,14 +14,22 @@ const navigateTool: ToolDefinition = {
     },
     required: ['url'],
   },
-  action: 'navigate' as ActionType,
+  action: 'navigate',
 
   formatResult(result: unknown) {
+    if (!result || typeof result !== 'object') {
+      return [
+        {
+          type: 'text' as const,
+          text: 'Navigation completed (no details returned)',
+        },
+      ];
+    }
     const r = result as NavigateResult;
     return [
       {
         type: 'text' as const,
-        text: `Navigated to ${r.url}\nTitle: ${r.title}`,
+        text: `Navigated to ${r.url ?? 'unknown'}\nTitle: ${r.title ?? ''}`,
       },
     ];
   },

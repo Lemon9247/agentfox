@@ -14,6 +14,7 @@ import type { ServerConfig } from './types.js';
 // ============================================================
 
 const SERVER_NAME = 'agentfox';
+// TODO: read from package.json at build time
 const SERVER_VERSION = '0.1.0';
 const DEFAULT_TIMEOUT_MS = 30_000;
 
@@ -104,11 +105,14 @@ export async function main(): Promise<void> {
       };
     }
 
-    // Build the Command for the extension
-    const command: Command = {
+    // Build the Command for the extension.
+    // The MCP SDK validates args against inputSchema before reaching this point,
+    // so the action-params pairing is guaranteed correct. The discriminated union
+    // cannot be constructed generically without a type assertion.
+    const command = {
       id: crypto.randomUUID(),
       action: tool.action,
-      params: (args ?? {}) as Command['params'],
+      params: args ?? {},
     } as Command;
 
     try {
@@ -137,15 +141,19 @@ export async function main(): Promise<void> {
   });
 
   // ---- Graceful shutdown ----
-  function shutdown(): void {
+  async function shutdown(): Promise<void> {
     log('Shutting down...');
     ipcServer.close();
-    mcpServer.close().catch(() => {});
+    try {
+      await mcpServer.close();
+    } catch {
+      /* ignore close errors */
+    }
     process.exit(0);
   }
 
-  process.on('SIGINT', shutdown);
-  process.on('SIGTERM', shutdown);
+  process.on('SIGINT', () => void shutdown());
+  process.on('SIGTERM', () => void shutdown());
 
   // ---- Connect transport and start ----
   const transport = new StdioServerTransport();
