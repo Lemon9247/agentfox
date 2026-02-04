@@ -1,1 +1,48 @@
-// Tool registry — will be implemented in Wave 3
+import type { ActionType } from '@agentfox/shared';
+
+// ============================================================
+// Tool Definition Interface
+// ============================================================
+
+/** Content item types returned by MCP tool handlers */
+export type McpContent =
+  | { type: 'text'; text: string }
+  | { type: 'image'; data: string; mimeType: string };
+
+/**
+ * A tool definition describes one MCP tool: its name, schema, what
+ * Command action it maps to, and how to format the extension's result
+ * into MCP content.
+ */
+export interface ToolDefinition {
+  /** MCP tool name (e.g. "browser_navigate") */
+  name: string;
+  /** Human-readable description shown to the model */
+  description: string;
+  /** JSON Schema for the tool's input parameters */
+  inputSchema: Record<string, unknown>;
+  /** The Command.action this tool maps to */
+  action: ActionType;
+  /** Convert the CommandResponse.result into an MCP content array */
+  formatResult: (result: unknown) => McpContent[];
+}
+
+// ============================================================
+// Tool Registry
+// ============================================================
+
+import navigateTool from './navigate.js';
+import snapshotTool from './snapshot.js';
+import screenshotTool from './screenshot.js';
+
+/** All registered tool definitions */
+export const tools: ToolDefinition[] = [
+  navigateTool,
+  snapshotTool,
+  screenshotTool,
+];
+
+/** Look up a tool by its MCP name. Returns undefined if not found. */
+export function getToolByName(name: string): ToolDefinition | undefined {
+  return tools.find((t) => t.name === name);
+}
