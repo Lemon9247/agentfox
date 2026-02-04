@@ -24,6 +24,7 @@ describe('tool registry', () => {
       'browser_resize',
       'browser_evaluate',
       'browser_wait_for',
+      'browser_page_content',
     ];
     const actualNames = tools.map((t) => t.name);
     for (const name of expectedNames) {
@@ -480,6 +481,26 @@ describe('wait_for formatResult', () => {
   });
 });
 
+describe('page_content formatResult', () => {
+  const tool = getToolByName('browser_page_content')!;
+
+  it('formats valid page content result', () => {
+    const result = tool.formatResult({
+      text: 'Hello world',
+      url: 'https://example.com',
+      title: 'Example',
+    });
+    expect((result[0] as any).text).toContain('Hello world');
+    expect((result[0] as any).text).toContain('https://example.com');
+    expect((result[0] as any).text).toContain('Example');
+  });
+
+  it('handles null result', () => {
+    const result = tool.formatResult(null);
+    expect((result[0] as any).text).toContain('no details');
+  });
+});
+
 // ============================================================
 // Action mapping
 // ============================================================
@@ -490,7 +511,7 @@ describe('tool action mapping', () => {
       'navigate', 'navigate_back', 'snapshot', 'screenshot',
       'click', 'type', 'press_key', 'hover',
       'fill_form', 'select_option', 'evaluate', 'wait_for',
-      'tabs', 'close', 'resize',
+      'tabs', 'close', 'resize', 'page_content',
     ]);
     for (const tool of tools) {
       expect(validActions.has(tool.action)).toBe(true);

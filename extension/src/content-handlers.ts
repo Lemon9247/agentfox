@@ -14,6 +14,7 @@ import type {
   SelectOptionParams,
   EvaluateParams,
   WaitForParams,
+  PageContentParams,
   ContentRequest,
   ContentResponse,
 } from '@agentfox/shared';
@@ -1346,6 +1347,34 @@ export function handleWaitFor(params: WaitForParams): Promise<{ matched: boolean
 }
 
 // ============================================================
+// Page content handler
+// ============================================================
+
+export function handlePageContent(params: PageContentParams): { text: string; url: string; title: string } {
+  let root: Element | null = document.body;
+  if (params.selector) {
+    root = document.querySelector(params.selector);
+    if (!root) {
+      throw new Error(`No element found matching selector: ${params.selector}`);
+    }
+  }
+
+  // Extract text content, cleaning up whitespace
+  const rawText = root?.textContent || '';
+  // Normalize whitespace: collapse multiple spaces/newlines, trim
+  const text = rawText
+    .replace(/\s+/g, ' ')
+    .replace(/ ?\n ?/g, '\n')
+    .trim();
+
+  return {
+    text,
+    url: window.location.href,
+    title: document.title,
+  };
+}
+
+// ============================================================
 // Message handling
 // ============================================================
 
@@ -1360,6 +1389,7 @@ export const IMPLEMENTED_ACTIONS: ReadonlySet<ActionType> = new Set([
   'select_option',
   'evaluate',
   'wait_for',
+  'page_content',
 ]);
 
 export function isContentRequest(message: unknown): message is ContentRequest {
@@ -1447,6 +1477,10 @@ export async function processRequest(
 
       case 'wait_for':
         result = await handleWaitFor(params as WaitForParams);
+        break;
+
+      case 'page_content':
+        result = handlePageContent(params as PageContentParams);
         break;
 
       default:

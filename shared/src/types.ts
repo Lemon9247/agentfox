@@ -18,7 +18,8 @@ export type ActionType =
   | 'wait_for'
   | 'tabs'
   | 'close'
-  | 'resize';
+  | 'resize'
+  | 'page_content';
 
 // ============================================================
 // Tool Parameter Types — typed params for each action
@@ -107,6 +108,10 @@ export interface ResizeParams {
   height: number;
 }
 
+export interface PageContentParams {
+  selector?: string;
+}
+
 /** No params needed */
 export type EmptyParams = Record<string, never>;
 
@@ -134,7 +139,8 @@ export type Command =
   | CommandBase & { action: 'wait_for'; params: WaitForParams }
   | CommandBase & { action: 'tabs'; params: TabsParams }
   | CommandBase & { action: 'close'; params: EmptyParams }
-  | CommandBase & { action: 'resize'; params: ResizeParams };
+  | CommandBase & { action: 'resize'; params: ResizeParams }
+  | CommandBase & { action: 'page_content'; params: PageContentParams };
 
 /** Response from extension back to MCP server */
 export interface CommandResponse {
@@ -214,6 +220,12 @@ export interface EvaluateResult {
 
 export interface WaitForResult {
   matched: boolean;
+}
+
+export interface PageContentResult {
+  text: string;
+  url: string;
+  title: string;
 }
 
 // ============================================================
