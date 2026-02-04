@@ -33,15 +33,12 @@ declare namespace browser {
 
 /** Elements that should be skipped entirely during tree walks */
 const SKIP_TAGS = new Set([
-  'SCRIPT', 'STYLE', 'NOSCRIPT', 'TEMPLATE', 'SVG',
+  'SCRIPT', 'STYLE', 'NOSCRIPT', 'TEMPLATE', 'SVG', 'IFRAME',
 ]);
 
 /** Tags that map to implicit ARIA roles */
 const TAG_ROLE_MAP: Record<string, string> = {
-  A: 'link',
   BUTTON: 'button',
-  SELECT: 'combobox',
-  TEXTAREA: 'textbox',
   NAV: 'navigation',
   MAIN: 'main',
   ASIDE: 'complementary',
@@ -57,6 +54,7 @@ const TAG_ROLE_MAP: Record<string, string> = {
   LI: 'listitem',
   DIALOG: 'dialog',
   IMG: 'img',
+  OPTION: 'option',
 };
 
 /** Input type → role mapping */
@@ -75,19 +73,26 @@ const INPUT_TYPE_ROLE_MAP: Record<string, string> = {
   reset: 'button',
   button: 'button',
   image: 'button',
-  file: 'button',
+  file: 'button', // Browsers expose file inputs as buttons (the text field is internal)
 };
 
 /** Generic wrapper tags that should be flattened unless they carry semantic role */
 const GENERIC_TAGS = new Set([
-  'DIV', 'SPAN', 'SECTION', 'ARTICLE',
+  'DIV', 'SPAN',
 ]);
 
 // ============================================================
 // Module-level state
 // ============================================================
 
-/** Maps ref IDs to DOM elements. Rebuilt on each snapshot. */
+/**
+ * Maps ref IDs (e.g. "e0", "e1") to DOM elements.
+ * Rebuilt on every snapshot call. Phase 2 action handlers will use this
+ * to resolve refs from the agent into DOM elements.
+ *
+ * IMPORTANT: refs become stale if the DOM mutates or a new snapshot is taken.
+ * Phase 2 should detect stale refs and return clear error messages.
+ */
 let refMap = new Map<string, Element>();
 
 /** Counter for generating sequential ref IDs */
@@ -97,12 +102,14 @@ let refCounter = 0;
 // Logging
 // ============================================================
 
+const DEBUG = false;
+
 function log(...args: unknown[]): void {
-  console.log('[AgentFox:content]', ...args);
+  if (DEBUG) console.log('[AgentFox:content]', ...args);
 }
 
 function logError(...args: unknown[]): void {
-  console.error('[AgentFox:content]', ...args);
+  if (DEBUG) console.error('[AgentFox:content]', ...args);
 }
 
 // ============================================================
@@ -111,25 +118,23 @@ function logError(...args: unknown[]): void {
 
 /** Check if an element is hidden and should be skipped */
 function isHidden(el: Element): boolean {
-  // Check HTML hidden attribute
   if (el.hasAttribute('hidden')) return true;
-
-  // Check aria-hidden
   if (el.getAttribute('aria-hidden') === 'true') return true;
 
-  // Check computed styles (only for HTMLElements)
   if (el instanceof HTMLElement) {
+    // Fast inline style check (no layout trigger)
     const style = el.style;
-    // Check inline styles first (fast path)
     if (style.display === 'none' || style.visibility === 'hidden') return true;
 
-    // Fall back to computed style
-    const computed = window.getComputedStyle(el);
-    if (computed.display === 'none' || computed.visibility === 'hidden') {
-      return true;
+    // offsetParent is null for display:none elements (and for body, fixed, sticky)
+    // This avoids getComputedStyle in the common case
+    if (el.offsetParent === null && el.tagName !== 'BODY') {
+      // Could be display:none OR position:fixed/sticky — need getComputedStyle to distinguish
+      const computed = window.getComputedStyle(el);
+      if (computed.display === 'none') return true;
+      if (computed.visibility === 'hidden') return true;
     }
   }
-
   return false;
 }
 
@@ -148,6 +153,11 @@ function getRole(el: Element): string {
   // Headings
   if (/^H[1-6]$/.test(tag)) return 'heading';
 
+  // Anchor elements: only 'link' if they have an href
+  if (tag === 'A') {
+    return el.hasAttribute('href') ? 'link' : 'generic';
+  }
+
   // Input elements have type-specific roles
   if (tag === 'INPUT') {
     const inputType = (el as HTMLInputElement).type || 'text';
@@ -157,11 +167,17 @@ function getRole(el: Element): string {
   // Textarea
   if (tag === 'TEXTAREA') return 'textbox';
 
-  // Section with aria-label/aria-labelledby is a region
+  // Select: multiple → listbox, single → combobox
+  if (tag === 'SELECT') {
+    return (el as HTMLSelectElement).multiple ? 'listbox' : 'combobox';
+  }
+
+  // Section with aria-label/aria-labelledby is a region, otherwise generic
   if (tag === 'SECTION') {
     if (el.hasAttribute('aria-label') || el.hasAttribute('aria-labelledby')) {
       return 'region';
     }
+    return 'generic';
   }
 
   // Article
@@ -180,6 +196,13 @@ function getRole(el: Element): string {
 // ============================================================
 // Interactive element detection
 // ============================================================
+
+/** ARIA roles that indicate an interactive element */
+const INTERACTIVE_ROLES = new Set([
+  'button', 'link', 'checkbox', 'radio', 'textbox', 'combobox',
+  'slider', 'switch', 'tab', 'menuitem', 'menuitemcheckbox',
+  'menuitemradio', 'option', 'treeitem', 'searchbox', 'spinbutton',
+]);
 
 /** Check if an element should receive a ref ID */
 function isInteractive(el: Element): boolean {
@@ -206,22 +229,7 @@ function isInteractive(el: Element): boolean {
 
   // ARIA interactive roles
   const role = el.getAttribute('role');
-  if (
-    role === 'button' ||
-    role === 'link' ||
-    role === 'checkbox' ||
-    role === 'radio' ||
-    role === 'textbox' ||
-    role === 'combobox' ||
-    role === 'slider' ||
-    role === 'switch' ||
-    role === 'tab' ||
-    role === 'menuitem' ||
-    role === 'option' ||
-    role === 'treeitem'
-  ) {
-    return true;
-  }
+  if (role && INTERACTIVE_ROLES.has(role)) return true;
 
   return false;
 }
@@ -236,6 +244,22 @@ function getTextById(id: string): string {
   return el ? (el.textContent || '').trim() : '';
 }
 
+/** Collect text content from an element, excluding form control descendants */
+function getTextExcludingFormElements(el: Element): string {
+  let text = '';
+  for (const child of el.childNodes) {
+    if (child.nodeType === Node.TEXT_NODE) {
+      text += child.textContent || '';
+    } else if (child.nodeType === Node.ELEMENT_NODE) {
+      const tag = (child as Element).tagName;
+      if (tag !== 'INPUT' && tag !== 'SELECT' && tag !== 'TEXTAREA') {
+        text += getTextExcludingFormElements(child as Element);
+      }
+    }
+  }
+  return text.trim();
+}
+
 /** Find the label element associated with an input */
 function findAssociatedLabel(el: Element): string {
   // Check for label via 'for' attribute
@@ -245,16 +269,10 @@ function findAssociatedLabel(el: Element): string {
     if (label) return (label.textContent || '').trim();
   }
 
-  // Check for wrapping label
+  // Check for wrapping label — walk text nodes to avoid cloning the DOM
   const parentLabel = el.closest('label');
   if (parentLabel) {
-    // Get the label's text but exclude the input's own text content
-    const clone = parentLabel.cloneNode(true) as HTMLElement;
-    // Remove all input/select/textarea children from clone
-    clone.querySelectorAll('input, select, textarea').forEach((child) =>
-      child.remove(),
-    );
-    return (clone.textContent || '').trim();
+    return getTextExcludingFormElements(parentLabel);
   }
 
   return '';
@@ -462,11 +480,21 @@ function isSemanticRole(role: string): boolean {
   return role !== 'generic';
 }
 
+/** Maximum number of nodes to process before truncating the tree */
+const MAX_NODES = 50000;
+
+/** Running node counter, reset per snapshot */
+let nodeCount = 0;
+
 /**
  * Build an AccessibilityNode from a DOM element and its subtree.
  * Returns null if the element should be excluded from the tree.
  */
 function buildNode(el: Element, depth: number): AccessibilityNode | null {
+  // Bail if we've hit the node limit
+  if (nodeCount >= MAX_NODES) return null;
+  nodeCount++;
+
   // Hard depth limit to prevent stack overflow on pathological DOMs
   if (depth > 100) return null;
 
@@ -481,40 +509,24 @@ function buildNode(el: Element, depth: number): AccessibilityNode | null {
   const name = getAccessibleName(el);
   const semantic = isSemanticRole(role);
 
-  // Build children recursively
+  // Build children by walking childNodes in document order, interleaving
+  // element children and text pseudo-nodes to preserve correct ordering.
   const childNodes: AccessibilityNode[] = [];
-  let hasElementChildren = false;
 
-  for (const child of el.children) {
-    hasElementChildren = true;
-    const childNode = buildNode(child, depth + 1);
-    if (childNode) {
-      childNodes.push(childNode);
-    }
-  }
-
-  // Collect text that is a direct child of this element (text nodes between
-  // child elements). Only create text pseudo-nodes for text not already
-  // captured as the element's accessible name.
-  if (hasElementChildren) {
-    // Walk child nodes to find text nodes interspersed with elements
-    let textParts: string[] = [];
-    for (const child of el.childNodes) {
-      if (child.nodeType === Node.TEXT_NODE) {
-        const t = (child.textContent || '').trim();
-        if (t) textParts.push(t);
+  for (const child of el.childNodes) {
+    if (child.nodeType === Node.ELEMENT_NODE) {
+      const childNode = buildNode(child as Element, depth + 1);
+      if (childNode) {
+        childNodes.push(childNode);
       }
-    }
-    // Only add text pseudo-nodes if the text differs from the element's own name
-    const directText = textParts.join(' ');
-    if (directText && directText !== name) {
-      // Insert text nodes at position (we push at the beginning for simplicity,
-      // but we'll collect them and intersperse properly)
-      // For simplicity, add one combined text node if there's leftover text
-      childNodes.unshift({
-        role: 'text',
-        name: directText.length > 200 ? directText.slice(0, 200) + '...' : directText,
-      });
+    } else if (child.nodeType === Node.TEXT_NODE) {
+      const text = (child.textContent || '').trim();
+      if (text && text !== name) {
+        childNodes.push({
+          role: 'text',
+          name: text.length > 200 ? text.slice(0, 200) + '...' : text,
+        });
+      }
     }
   }
 
@@ -535,11 +547,7 @@ function buildNode(el: Element, depth: number): AccessibilityNode | null {
       // Single child — promote it directly
       return childNodes[0];
     }
-    // Multiple children — return a synthetic group only if needed
-    // Actually, just return null and let parent collect the children
-    // We handle this by returning a special "flatten" marker
-    // Instead, we'll use an approach where we return children as an array
-    // by wrapping in a generic node that the parent will flatten
+    // Wrap in generic node — parent's flattenGenericChildren will inline these
     return {
       role: 'generic',
       name: '',
@@ -621,6 +629,7 @@ function buildAccessibilityTree(): AccessibilityNode {
   // Reset state for fresh build
   refMap = new Map();
   refCounter = 0;
+  nodeCount = 0;
 
   const root: AccessibilityNode = {
     role: 'document',
@@ -638,6 +647,15 @@ function buildAccessibilityTree(): AccessibilityNode {
   const flatChildren = flattenGenericChildren(children);
   if (flatChildren.length > 0) {
     root.children = flatChildren;
+  }
+
+  // If we hit the node limit, add a truncation indicator
+  if (nodeCount >= MAX_NODES) {
+    if (!root.children) root.children = [];
+    root.children.push({
+      role: 'text',
+      name: `[Tree truncated at ${MAX_NODES} nodes]`,
+    });
   }
 
   return root;
@@ -692,10 +710,43 @@ function makeResponse(
   return response;
 }
 
+/** Process a validated content request and return a response */
+async function processRequest(id: string, action: ActionType): Promise<ContentResponse> {
+  try {
+    if (!IMPLEMENTED_ACTIONS.has(action)) {
+      return makeResponse(
+        id,
+        false,
+        undefined,
+        `Action '${action}' is not yet implemented in the content script`,
+      );
+    }
+
+    switch (action) {
+      case 'snapshot': {
+        const result = handleSnapshot();
+        return makeResponse(id, true, result);
+      }
+
+      default:
+        return makeResponse(
+          id,
+          false,
+          undefined,
+          `Unhandled action: ${action}`,
+        );
+    }
+  } catch (err) {
+    const errMsg = err instanceof Error ? err.message : String(err);
+    logError(`Error handling ${action} [${id}]:`, err);
+    return makeResponse(id, false, undefined, errMsg);
+  }
+}
+
 /**
  * Handle an incoming message from the background script.
  * Returns a Promise<ContentResponse> for content requests,
- * or undefined for unrelated messages.
+ * or undefined for unrelated messages (Firefox onMessage contract).
  */
 function handleMessage(
   message: unknown,
@@ -706,39 +757,7 @@ function handleMessage(
   const { id, action } = message;
   log(`Received ${action} request [${id}]`);
 
-  // Return a promise — Firefox MV2 content scripts can return promises
-  // from onMessage listeners
-  return (async (): Promise<ContentResponse> => {
-    try {
-      if (!IMPLEMENTED_ACTIONS.has(action)) {
-        return makeResponse(
-          id,
-          false,
-          undefined,
-          `Action '${action}' is not yet implemented in the content script`,
-        );
-      }
-
-      switch (action) {
-        case 'snapshot': {
-          const result = handleSnapshot();
-          return makeResponse(id, true, result);
-        }
-
-        default:
-          return makeResponse(
-            id,
-            false,
-            undefined,
-            `Unhandled action: ${action}`,
-          );
-      }
-    } catch (err) {
-      const errMsg = err instanceof Error ? err.message : String(err);
-      logError(`Error handling ${action} [${id}]:`, err);
-      return makeResponse(id, false, undefined, errMsg);
-    }
-  })();
+  return processRequest(id, action);
 }
 
 // ============================================================
