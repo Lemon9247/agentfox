@@ -1276,7 +1276,7 @@ export async function handleEvaluate(params: EvaluateParams): Promise<{ value: u
 
 export function handleWaitFor(params: WaitForParams): Promise<{ matched: boolean }> {
   // Validate that at least one parameter is provided
-  if (!params.text && !params.textGone && !params.time) {
+  if (!params.text && !params.textGone && params.time == null) {
     return Promise.reject(
       new Error('At least one of "text", "textGone", or "time" must be provided'),
     );
@@ -1330,7 +1330,7 @@ export function handleWaitFor(params: WaitForParams): Promise<{ matched: boolean
 
     const observer = new MutationObserver(() => {
       if (resolved) return;
-      if (debounceTimer !== null) return;
+      if (debounceTimer !== null) clearTimeout(debounceTimer);
       debounceTimer = setTimeout(() => {
         debounceTimer = null;
         checkText();
@@ -1341,7 +1341,6 @@ export function handleWaitFor(params: WaitForParams): Promise<{ matched: boolean
       childList: true,
       subtree: true,
       characterData: true,
-      attributes: true,
     });
   });
 }
