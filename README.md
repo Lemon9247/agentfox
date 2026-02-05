@@ -136,3 +136,7 @@ This is appropriate for a personal tool where you're supervising the agent. It w
 ## Status
 
 Active development. The core pipeline works end-to-end with a full set of interaction tools — navigation, clicking, typing, form filling, tab management, JavaScript evaluation, and more.
+
+## License
+
+MIT License. See `LICENSE`
